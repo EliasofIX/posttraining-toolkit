@@ -8,8 +8,8 @@ import torch
 from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ptk.distributed.detect import detect_device, torch_device_string
 from ptk.config.schema import DeviceType
+from ptk.distributed.detect import detect_device, torch_device_string
 
 
 class SelfInstructGenerator:

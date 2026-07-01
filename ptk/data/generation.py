@@ -6,7 +6,7 @@ from pathlib import Path
 
 from datasets import Dataset
 
-from ptk.config.schema import DataConfig, PTKConfig
+from ptk.config.schema import PTKConfig
 from ptk.data.generators.base import get_generator
 from ptk.logging import Logger
 

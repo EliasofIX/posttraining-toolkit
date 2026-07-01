@@ -8,7 +8,7 @@ from datasets import DatasetDict
 from transformers import AutoModelForCausalLM
 from trl import GRPOConfig, GRPOTrainer
 
-from ptk.distributed.detect import torch_device_string
+from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
 from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokenizer
 
 
@@ -16,7 +16,13 @@ def _reward_length(completions: list, **kwargs) -> list[float]:
     """Simple length-based reward for smoke tests."""
     rewards = []
     for completion in completions:
-        text = completion[0]["content"] if completion else ""
+        if isinstance(completion, str):
+            text = completion
+        elif isinstance(completion, list) and completion:
+            item = completion[0]
+            text = item.get("content", str(item)) if isinstance(item, dict) else str(item)
+        else:
+            text = str(completion)
         length = len(text.split())
         rewards.append(min(1.0, length / 50.0))
     return rewards
@@ -37,6 +43,8 @@ class GRPOTrainerWrapper(BaseTrainer):
             model.to(device)
 
         t = self.config.training
+        precision = resolve_mixed_precision(self.env.device, self.config.compute.mixed_precision)
+        use_cpu = device == "cpu"
 
         def to_prompt(example):
             text = example.get("text", example.get("prompt", ""))
@@ -57,6 +65,9 @@ class GRPOTrainerWrapper(BaseTrainer):
             num_generations=rl.num_generations,
             max_completion_length=rl.max_completion_length,
             beta=rl.beta,
+            use_cpu=use_cpu,
+            fp16=precision == "fp16",
+            bf16=precision == "bf16",
         )
 
         trainer = GRPOTrainer(

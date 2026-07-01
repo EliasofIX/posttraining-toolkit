@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-from typing import Any
 
 import torch
 from peft import PeftModel
@@ -90,29 +89,24 @@ def _export_merged_fp16(config: PTKConfig, checkpoint: Path, out_dir: Path) -> s
 
 
 def _export_gguf(config: PTKConfig, checkpoint: Path, out_path: Path) -> str:
-    """Export to GGUF via llama.cpp convert script if available, else stub metadata."""
+    """Export to GGUF using native converter or llama.cpp fallback."""
     merged_dir = out_path.parent / "merged_for_gguf"
     _export_merged_fp16(config, checkpoint, merged_dir)
 
-    convert_script = shutil.which("convert_hf_to_gguf.py")
-    if convert_script:
-        import subprocess
+    try:
+        from ptk.export.gguf_convert import convert_hf_to_gguf
 
-        subprocess.run(
-            ["python", convert_script, str(merged_dir), "--outfile", str(out_path)],
-            check=True,
-        )
-        return str(out_path)
+        result = convert_hf_to_gguf(merged_dir, out_path, outtype="f16")
+        return str(result)
+    except Exception as exc:
+        from ptk.exceptions import RuntimeError as PTKRuntimeError
 
-    stub = {
-        "format": "gguf",
-        "status": "stub",
-        "message": "llama.cpp convert_hf_to_gguf.py not found; merged fp16 weights saved instead",
-        "source": str(merged_dir),
-    }
-    stub_path = out_path.with_suffix(".json")
-    stub_path.write_text(json.dumps(stub, indent=2), encoding="utf-8")
-    return str(stub_path)
+        if isinstance(exc, PTKRuntimeError):
+            raise
+        raise PTKRuntimeError(
+            f"GGUF export failed: {exc}",
+            code="GGUF_CONVERT_FAILED",
+        ) from exc
 
 
 def _push_to_hub(config: PTKConfig, artifacts: dict[str, str], logger: Logger) -> None:

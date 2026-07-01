@@ -10,7 +10,6 @@ from ptk.config.loader import load_config
 from ptk.config.schema import TrainingMethod
 from ptk.exceptions import ValidationError
 
-
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
@@ -40,7 +39,14 @@ def test_invalid_config_raises():
 
 
 def test_ppo_requires_reward_model():
-    from ptk.config.schema import PTKConfig, DataConfig, DatasetConfig, DatasetFormat, RLConfig, TrainingConfig
+    from ptk.config.schema import (
+        DataConfig,
+        DatasetConfig,
+        DatasetFormat,
+        PTKConfig,
+        RLConfig,
+        TrainingConfig,
+    )
 
     with pytest.raises(Exception):
         PTKConfig(

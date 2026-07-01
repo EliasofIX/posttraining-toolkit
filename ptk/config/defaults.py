@@ -5,9 +5,9 @@ from __future__ import annotations
 from ptk.config.schema import (
     ComputeConfig,
     DataConfig,
-    DataSource,
     DatasetConfig,
     DatasetFormat,
+    DataSource,
     EvalConfig,
     LoRAConfig,
     OutputConfig,

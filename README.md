@@ -127,10 +127,12 @@ Registry stored in `.ptk/registry/` by default. Set `PTK_S3_BUCKET` for S3-compa
 ## Testing
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,gguf]"
 pytest tests/ -v
-pytest tests/test_integration.py -v -m slow  # full e2e (downloads distilgpt2)
+pytest tests/test_integration.py tests/test_gguf_export.py -v -m slow
 ```
+
+CI runs on push/PR via GitHub Actions (unit tests on Python 3.10–3.12, integration tests, optional macOS MPS smoke).
 
 ## Project Structure
 
