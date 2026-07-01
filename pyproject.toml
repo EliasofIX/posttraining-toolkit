@@ -1,0 +1,82 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "posttraining-toolkit"
+version = "0.1.0"
+description = "Declarative posttraining pipeline for SFT, LoRA, QLoRA, DPO, PPO, and GRPO"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Posttraining Toolkit Contributors" }]
+keywords = ["llm", "fine-tuning", "lora", "qlora", "dpo", "ppo", "grpo", "trl"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "accelerate>=0.28.0",
+    "datasets>=2.18.0",
+    "huggingface-hub>=0.22.0",
+    "jinja2>=3.1.0",
+    "numpy>=1.24.0",
+    "peft>=0.10.0",
+    "pydantic>=2.6.0",
+    "pyyaml>=6.0",
+    "rich>=13.7.0",
+    "safetensors>=0.4.0",
+    "sentencepiece>=0.2.0",
+    "tokenizers>=0.15.0",
+    "torch>=2.1.0",
+    "transformers>=4.40.0",
+    "trl>=0.8.0",
+    "typer>=0.12.0",
+]
+
+[project.optional-dependencies]
+cuda = [
+    "bitsandbytes>=0.43.0",
+    "deepspeed>=0.14.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.3.0",
+]
+all = [
+    "posttraining-toolkit[cuda,dev]",
+]
+
+[project.scripts]
+ptk = "ptk.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/posttraining-toolkit/posttraining-toolkit"
+Documentation = "https://github.com/posttraining-toolkit/posttraining-toolkit#readme"
+Repository = "https://github.com/posttraining-toolkit/posttraining-toolkit"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ptk"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

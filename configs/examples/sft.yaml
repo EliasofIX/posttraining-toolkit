@@ -1,0 +1,40 @@
+run_name: sft-distilgpt2
+base_model: distilgpt2
+method: sft
+
+data:
+  source: dataset
+  dataset:
+    path: ./data/train.jsonl
+    format: jsonl
+    text_column: text
+  train_split: 0.9
+  seed: 42
+
+training:
+  epochs: 1
+  max_iters: 10
+  learning_rate: 5.0e-5
+  batch_size: 2
+  gradient_accumulation_steps: 1
+  max_seq_length: 128
+  logging_steps: 2
+  save_steps: 5
+
+compute:
+  strategy: auto
+  device: auto
+  mixed_precision: auto
+
+eval:
+  benchmarks:
+    - perplexity
+    - generation_quality
+  eval_steps: 5
+  max_samples: 3
+
+output:
+  dir: ./outputs
+  export:
+    - adapter_only
+  push_to_hub: false

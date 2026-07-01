@@ -1,0 +1,33 @@
+run_name: dpo-distilgpt2
+base_model: distilgpt2
+method: dpo
+
+data:
+  source: dataset
+  dataset:
+    path: ./data/preferences.jsonl
+    format: jsonl
+    prompt_column: prompt
+    chosen_column: chosen
+    rejected_column: rejected
+
+training:
+  epochs: 1
+  max_iters: 5
+  learning_rate: 5.0e-7
+  batch_size: 1
+  max_seq_length: 128
+  logging_steps: 2
+  save_steps: 5
+  rl:
+    beta: 0.1
+    kl_coef: 0.05
+
+compute:
+  strategy: auto
+  device: auto
+
+output:
+  dir: ./outputs
+  export:
+    - adapter_only

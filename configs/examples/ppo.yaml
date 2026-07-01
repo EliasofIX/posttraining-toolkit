@@ -1,0 +1,32 @@
+run_name: ppo-distilgpt2
+base_model: distilgpt2
+method: ppo
+
+data:
+  source: dataset
+  dataset:
+    path: ./data/train.jsonl
+    format: jsonl
+    text_column: text
+
+training:
+  epochs: 1
+  max_iters: 3
+  learning_rate: 1.0e-5
+  batch_size: 1
+  logging_steps: 1
+  save_steps: 3
+  rl:
+    beta: 0.1
+    reward_model: distilbert-base-uncased
+    kl_coef: 0.05
+    max_completion_length: 32
+
+compute:
+  strategy: auto
+  device: auto
+
+output:
+  dir: ./outputs
+  export:
+    - adapter_only

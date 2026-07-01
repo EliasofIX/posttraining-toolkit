@@ -1,0 +1,35 @@
+run_name: test-sft
+base_model: distilgpt2
+method: sft
+
+data:
+  source: dataset
+  dataset:
+    path: tests/fixtures/data/train.jsonl
+    format: jsonl
+    text_column: text
+
+training:
+  epochs: 1
+  max_iters: 2
+  learning_rate: 5.0e-5
+  batch_size: 1
+  max_seq_length: 64
+  logging_steps: 1
+  save_steps: 2
+  gradient_accumulation_steps: 1
+
+compute:
+  device: cpu
+  strategy: single_gpu
+  mixed_precision: fp32
+
+eval:
+  benchmarks:
+    - perplexity
+  max_samples: 2
+
+output:
+  dir: ./test_outputs
+  export:
+    - adapter_only

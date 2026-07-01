@@ -1,0 +1,85 @@
+"""GRPO trainer via TRL."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from datasets import DatasetDict
+from transformers import AutoModelForCausalLM
+from trl import GRPOConfig, GRPOTrainer
+
+from ptk.distributed.detect import torch_device_string
+from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokenizer
+
+
+def _reward_length(completions: list, **kwargs) -> list[float]:
+    """Simple length-based reward for smoke tests."""
+    rewards = []
+    for completion in completions:
+        text = completion[0]["content"] if completion else ""
+        length = len(text.split())
+        rewards.append(min(1.0, length / 50.0))
+    return rewards
+
+
+class GRPOTrainerWrapper(BaseTrainer):
+    """Group Relative Policy Optimization."""
+
+    def train(self, dataset: DatasetDict, *, resume_from: Path | None = None) -> TrainerResult:
+        assert self.config.training.rl is not None
+        rl = self.config.training.rl
+        self.logger.start("GRPO training", model=self.config.base_model)
+
+        tokenizer = prepare_tokenizer(self.config.base_model)
+        device = torch_device_string(self.env.device)
+        model = AutoModelForCausalLM.from_pretrained(self.config.base_model, trust_remote_code=True)
+        if device != "cpu":
+            model.to(device)
+
+        t = self.config.training
+
+        def to_prompt(example):
+            text = example.get("text", example.get("prompt", ""))
+            return {"prompt": text[: rl.max_prompt_length]}
+
+        train_ds = dataset["train"].map(to_prompt)
+
+        grpo_config = GRPOConfig(
+            output_dir=str(self.output_dir),
+            num_train_epochs=t.epochs,
+            per_device_train_batch_size=t.batch_size,
+            gradient_accumulation_steps=t.gradient_accumulation_steps,
+            learning_rate=t.learning_rate,
+            logging_steps=t.logging_steps,
+            save_steps=t.save_steps,
+            report_to="none",
+            max_steps=t.max_iters if t.max_iters else -1,
+            num_generations=rl.num_generations,
+            max_completion_length=rl.max_completion_length,
+            beta=rl.beta,
+        )
+
+        trainer = GRPOTrainer(
+            model=model,
+            args=grpo_config,
+            train_dataset=train_ds,
+            processing_class=tokenizer,
+            reward_funcs=_reward_length,
+        )
+
+        if resume_from:
+            trainer.train(resume_from_checkpoint=str(resume_from))
+        else:
+            trainer.train()
+
+        final_path = self.output_dir / "final"
+        trainer.save_model(str(final_path))
+
+        result = TrainerResult(
+            output_dir=self.output_dir,
+            checkpoint_path=final_path,
+            global_step=trainer.state.global_step,
+        )
+        self.save_training_metadata(result)
+        self.logger.complete("GRPO training complete", step=result.global_step)
+        return result
