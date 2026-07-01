@@ -1,0 +1,41 @@
+run_name: lora-distilgpt2
+base_model: distilgpt2
+method: lora
+
+data:
+  source: dataset
+  dataset:
+    path: ./data/train.jsonl
+    format: jsonl
+    text_column: text
+
+training:
+  epochs: 1
+  max_iters: 10
+  learning_rate: 2.0e-4
+  batch_size: 2
+  max_seq_length: 128
+  logging_steps: 2
+  save_steps: 5
+  lora:
+    r: 8
+    alpha: 16
+    dropout: 0.05
+    target_modules:
+      - c_attn
+      - c_proj
+
+compute:
+  strategy: auto
+  device: auto
+
+eval:
+  benchmarks:
+    - perplexity
+  max_samples: 3
+
+output:
+  dir: ./outputs
+  export:
+    - adapter_only
+    - merged_fp16

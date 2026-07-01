@@ -1,0 +1,32 @@
+run_name: grpo-distilgpt2
+base_model: distilgpt2
+method: grpo
+
+data:
+  source: dataset
+  dataset:
+    path: ./data/train.jsonl
+    format: jsonl
+    text_column: text
+
+training:
+  epochs: 1
+  max_iters: 3
+  learning_rate: 5.0e-6
+  batch_size: 1
+  logging_steps: 1
+  save_steps: 3
+  rl:
+    beta: 0.04
+    num_generations: 2
+    max_prompt_length: 64
+    max_completion_length: 32
+
+compute:
+  strategy: auto
+  device: auto
+
+output:
+  dir: ./outputs
+  export:
+    - adapter_only
