@@ -10,8 +10,8 @@ import torch
 from datasets import DatasetDict
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig
-from trl import SFTTrainer as TRLSFTTrainer
 from trl import SFTConfig
+from trl import SFTTrainer as TRLSFTTrainer
 
 from ptk.config.schema import DeviceType, QuantBackend
 from ptk.distributed.detect import resolve_mixed_precision, torch_device_string

@@ -1,0 +1,34 @@
+run_name: test-grpo
+base_model: distilgpt2
+method: grpo
+
+data:
+  source: dataset
+  dataset:
+    path: tests/fixtures/data/train.jsonl
+    format: jsonl
+    text_column: text
+
+training:
+  epochs: 1
+  max_iters: 2
+  learning_rate: 5.0e-6
+  batch_size: 2
+  max_seq_length: 64
+  logging_steps: 1
+  save_steps: 2
+  rl:
+    beta: 0.04
+    num_generations: 2
+    max_prompt_length: 32
+    max_completion_length: 16
+
+compute:
+  device: cpu
+  strategy: single_gpu
+  mixed_precision: fp32
+
+output:
+  dir: ./test_outputs
+  export:
+    - adapter_only

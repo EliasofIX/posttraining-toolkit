@@ -1,6 +1,7 @@
 """CLI smoke tests."""
 
 from pathlib import Path
+
 from typer.testing import CliRunner
 
 from ptk.cli import app

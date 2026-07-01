@@ -6,8 +6,8 @@ from pathlib import Path
 
 from datasets import DatasetDict
 from transformers import AutoModelForCausalLM
-from trl import SFTTrainer as TRLSFTTrainer
 from trl import SFTConfig
+from trl import SFTTrainer as TRLSFTTrainer
 
 from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
 from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokenizer

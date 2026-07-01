@@ -2,7 +2,10 @@
 
 from datasets import Dataset
 
-from ptk.config.schema import DataConfig, DatasetConfig, DatasetFormat, SyntheticFilters, TrainingMethod
+from ptk.config.schema import (
+    SyntheticFilters,
+    TrainingMethod,
+)
 from ptk.data.pipeline import apply_filters, deduplicate, split_dataset
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from datasets import Dataset, DatasetDict
+from datasets import DatasetDict
 
 from ptk.config.schema import DataSource, PTKConfig
 from ptk.data.generation import generate_synthetic_data
@@ -133,18 +133,10 @@ def _prepare_data(config: PTKConfig, logger: Logger, registry: RunRegistry, run_
         raw = generate_synthetic_data(config, logger)
         data_cache.mkdir(parents=True, exist_ok=True)
         raw.save_to_disk(str(data_cache / "raw"))
-        config_with_data = config
-        from ptk.config.schema import DataConfig, DatasetConfig, DatasetFormat
-
-        temp_dataset_config = DataConfig(
-            source=DataSource.DATASET,
-            dataset=DatasetConfig(path=str(data_cache / "raw"), format=DatasetFormat.HF_HUB),
-        )
+        from datasets import DatasetDict as DD
         from datasets import load_from_disk
 
         loaded = load_from_disk(str(data_cache / "raw"))
-        from datasets import DatasetDict as DD
-
         split = loaded.train_test_split(test_size=0.1, seed=config.data.seed)
         return DD({"train": split["train"], "validation": split["test"]})
 

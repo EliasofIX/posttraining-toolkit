@@ -15,7 +15,6 @@ from ptk.distributed.detect import detect_environment, torch_device_string
 from ptk.logging import Logger
 from ptk.registry.runs import RunRegistry
 
-
 BENCHMARKS: dict[str, dict[str, Any]] = {
     "perplexity": {
         "description": "Compute perplexity on validation samples",

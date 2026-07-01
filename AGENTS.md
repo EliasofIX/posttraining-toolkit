@@ -157,6 +157,12 @@ ptk export <run_id> --format merged_fp16 --machine
 
 Export formats: `adapter_only`, `merged_fp16`, `gguf`.
 
+Install GGUF support:
+
+```bash
+pip install -e ".[gguf]"
+```
+
 ---
 
 ## 5. Error Recovery Playbook
@@ -195,10 +201,16 @@ Generate fixture data or switch to `data.source: synthetic`.
 
 ### 5.5 PPO Failures
 
-- `reward_model` must be a sequence-classification model (e.g., `distilbert-base-uncased`).
+- `reward_model` must share the policy tokenizer vocabulary (same tokenizer IDs). If you configure a different `reward_model`, the toolkit falls back to the `base_model` backbone with a warning.
 - Keep `max_iters` low for smoke tests (PPO is slow).
+- TRL 1.x uses `trl.experimental.ppo`; ensure `TRL_EXPERIMENTAL_SILENCE=1` is set (handled automatically by `ptk`).
 
-### 5.6 Hub Push Failures
+### 5.6 GRPO batch sizing
+
+- `training.batch_size` × `training.rl.num_generations` must satisfy TRL constraints: `generation_batch_size` divisible by `num_generations`, and `num_generations >= 2`.
+- Example smoke config: `batch_size: 2`, `num_generations: 2`.
+
+### 5.7 Hub Push Failures
 
 Non-fatal. Check `HF_TOKEN` env var. Export artifacts locally via `ptk export`.
 
@@ -281,6 +293,7 @@ ptk validate tests/fixtures/sft.yaml --json
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-07-01 | GGUF native GPT-2 converter, PPO/GRPO e2e tests, GitHub Actions CI | bootstrap |
 | 2026-07-01 | Initial AGENTS.md — full toolkit v0.1 | bootstrap |
 
 ---

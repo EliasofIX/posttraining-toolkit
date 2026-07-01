@@ -51,8 +51,11 @@ dev = [
     "pytest-cov>=5.0.0",
     "ruff>=0.3.0",
 ]
+gguf = [
+    "gguf>=0.10.0",
+]
 all = [
-    "posttraining-toolkit[cuda,dev]",
+    "posttraining-toolkit[cuda,dev,gguf]",
 ]
 
 [project.scripts]
@@ -80,3 +83,4 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
+ignore = ["E501"]
