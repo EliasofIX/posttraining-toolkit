@@ -112,13 +112,13 @@ def _export_gguf(config: PTKConfig, checkpoint: Path, out_path: Path) -> str:
 def _push_to_hub(config: PTKConfig, artifacts: dict[str, str], logger: Logger) -> None:
     model_id = config.output.hub_model_id or config.run_name
     try:
-        from huggingface_hub import HfApi
+        from ptk.hub.client import HubClient
 
-        api = HfApi()
-        api.create_repo(model_id, private=config.output.hub_private, exist_ok=True)
+        client = HubClient()
+        client.create_repo(model_id, private=config.output.hub_private, exist_ok=True)
         path = artifacts.get("merged_fp16") or artifacts.get("adapter_only")
         if path:
-            api.upload_folder(folder_path=path, repo_id=model_id, repo_type="model")
+            client.upload_folder(path, model_id, repo_type="model")
             logger.complete("Pushed to Hub", repo_id=model_id)
     except Exception as exc:
         logger.warn(f"Hub push failed: {exc}")

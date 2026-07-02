@@ -8,10 +8,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from datasets import DatasetDict
 from transformers import PreTrainedTokenizerBase, TrainingArguments
 
 from ptk.config.schema import PTKConfig
+from ptk.data.table import TableDict
 from ptk.distributed.detect import ComputeEnvironment, resolve_mixed_precision
 from ptk.logging import Logger
 
@@ -42,7 +42,7 @@ class BaseTrainer(ABC):
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     @abstractmethod
-    def train(self, dataset: DatasetDict, *, resume_from: Path | None = None) -> TrainerResult:
+    def train(self, dataset: TableDict, *, resume_from: Path | None = None) -> TrainerResult:
         """Execute training and return result."""
 
     def build_training_args(self, **overrides: Any) -> TrainingArguments:

@@ -8,10 +8,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from rich.console import Console
-from rich.theme import Theme
-
-_console = Console(theme=Theme({"info": "cyan", "warn": "yellow", "error": "red bold"}))
+from ptk.terminal import colorize, print_styled
 
 
 class EventType(str, Enum):
@@ -25,7 +22,7 @@ class EventType(str, Enum):
 
 
 class Logger:
-    """Dual-mode logger: Rich for humans, JSONL for agents."""
+    """Dual-mode logger: styled terminal for humans, JSONL for agents."""
 
     def __init__(self, machine: bool = False, verbose: bool = False) -> None:
         self.machine = machine
@@ -44,16 +41,16 @@ class Logger:
             return
 
         prefix = {
-            EventType.START: "[info]▶[/info]",
-            EventType.PROGRESS: "[info]…[/info]",
-            EventType.INFO: "[info]ℹ[/info]",
-            EventType.WARN: "[warn]⚠[/warn]",
-            EventType.ERROR: "[error]✗[/error]",
-            EventType.COMPLETE: "[info]✓[/info]",
-            EventType.METRIC: "[info]#[/info]",
+            EventType.START: colorize("▶", "info"),
+            EventType.PROGRESS: colorize("…", "info"),
+            EventType.INFO: colorize("ℹ", "info"),
+            EventType.WARN: colorize("⚠", "warn"),
+            EventType.ERROR: colorize("✗", "error"),
+            EventType.COMPLETE: colorize("✓", "info"),
+            EventType.METRIC: colorize("#", "info"),
         }[event_type]
         extra = f" {fields}" if fields and self.verbose else ""
-        _console.print(f"{prefix} {message}{extra}")
+        print_styled(prefix, message, extra=extra)
 
     def start(self, message: str, **fields: Any) -> None:
         self._emit(EventType.START, message, **fields)

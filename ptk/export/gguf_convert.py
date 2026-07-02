@@ -11,12 +11,12 @@ import sys
 from pathlib import Path
 from typing import Literal
 
-import numpy as np
 import torch
 from gguf import MODEL_ARCH, GGUFWriter, LlamaFileType, TensorNameMap
 from gguf.vocab import BpeVocab, SpecialVocab
 
 from ptk.exceptions import RuntimeError as PTKRuntimeError
+from ptk.io.safetensors import load_file as load_safetensors
 
 logger = logging.getLogger(__name__)
 
@@ -167,12 +167,12 @@ def _file_type(outtype: OutType) -> LlamaFileType:
     return mapping.get(outtype, LlamaFileType.MOSTLY_F16)
 
 
-def _numpy_dtype(outtype: OutType) -> np.dtype:
+def _torch_dtype(outtype: OutType) -> torch.dtype:
     if outtype == "f32":
-        return np.float32
+        return torch.float32
     if outtype == "bf16":
-        return np.float16  # stored as f16 in gguf for compatibility
-    return np.float16
+        return torch.bfloat16
+    return torch.float16
 
 
 def _convert_gpt2_native(model_dir: Path, output_path: Path, *, outtype: OutType) -> Path:
@@ -187,7 +187,7 @@ def _convert_gpt2_native(model_dir: Path, output_path: Path, *, outtype: OutType
     writer = GGUFWriter(str(output_path), arch="gpt2")
     tensor_map = TensorNameMap(MODEL_ARCH.GPT2, n_layer)
     ftype = _file_type(outtype)
-    np_dtype = _numpy_dtype(outtype)
+    torch_dtype = _torch_dtype(outtype)
 
     writer.add_block_count(n_layer)
     writer.add_context_length(n_ctx)
@@ -213,7 +213,7 @@ def _convert_gpt2_native(model_dir: Path, output_path: Path, *, outtype: OutType
             logger.debug("Skipping unmapped tensor: %s", name)
             continue
 
-        arr = data.numpy().astype(np_dtype)
+        arr = data.to(dtype=torch_dtype).contiguous().numpy()
         writer.add_tensor(gguf_name, arr)
 
         # GPT-2 ties output weights to token embeddings
@@ -262,9 +262,7 @@ def _write_gpt2_vocab(model_dir: Path, writer: GGUFWriter) -> None:
 def _load_state_dict(model_dir: Path) -> dict[str, torch.Tensor]:
     safetensors_path = model_dir / "model.safetensors"
     if safetensors_path.exists():
-        from safetensors.torch import load_file
-
-        return load_file(str(safetensors_path))
+        return load_safetensors(str(safetensors_path))
 
     bin_path = model_dir / "pytorch_model.bin"
     if bin_path.exists():

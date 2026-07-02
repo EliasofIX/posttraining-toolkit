@@ -3,9 +3,7 @@
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
-from ptk.cli import app
 from ptk.config.loader import load_config
 from ptk.config.schema import ExportFormat
 from ptk.export.formats import export_run
@@ -14,7 +12,12 @@ from ptk.pipeline import run_pipeline
 from ptk.registry.runs import RunRegistry, RunStatus
 
 FIXTURES = Path(__file__).parent / "fixtures"
-runner = CliRunner()
+
+
+def invoke(args: list[str]) -> tuple[int, str]:
+    from tests.test_cli import invoke
+
+    return invoke(args)
 
 
 def _run_e2e(fixture_name: str, tmp_path: Path, *, min_steps: int = 1) -> str:
@@ -71,5 +74,5 @@ def test_gguf_export_e2e(tmp_path):
 
 @pytest.mark.slow
 def test_cli_run_dry_run():
-    result = runner.invoke(app, ["run", str(FIXTURES / "sft.yaml"), "--dry-run"])
-    assert result.exit_code == 0
+    code, _ = invoke(["run", str(FIXTURES / "sft.yaml"), "--dry-run"])
+    assert code == 0

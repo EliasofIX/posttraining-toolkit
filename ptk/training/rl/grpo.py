@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from datasets import DatasetDict
 from transformers import AutoModelForCausalLM
 from trl import GRPOConfig, GRPOTrainer
 
+from ptk.data.hf_adapter import to_hf_dataset_dict
+from ptk.data.table import TableDict
 from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
 from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokenizer
 
@@ -31,7 +32,8 @@ def _reward_length(completions: list, **kwargs) -> list[float]:
 class GRPOTrainerWrapper(BaseTrainer):
     """Group Relative Policy Optimization."""
 
-    def train(self, dataset: DatasetDict, *, resume_from: Path | None = None) -> TrainerResult:
+    def train(self, dataset: TableDict, *, resume_from: Path | None = None) -> TrainerResult:
+        hf_data = to_hf_dataset_dict(dataset)
         assert self.config.training.rl is not None
         rl = self.config.training.rl
         self.logger.start("GRPO training", model=self.config.base_model)
@@ -50,7 +52,7 @@ class GRPOTrainerWrapper(BaseTrainer):
             text = example.get("text", example.get("prompt", ""))
             return {"prompt": text[: rl.max_prompt_length]}
 
-        train_ds = dataset["train"].map(to_prompt)
+        train_ds = hf_data["train"].map(to_prompt)
 
         grpo_config = GRPOConfig(
             output_dir=str(self.output_dir),

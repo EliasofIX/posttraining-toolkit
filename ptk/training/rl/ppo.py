@@ -6,9 +6,10 @@ import os
 from pathlib import Path
 
 import torch.nn as nn
-from datasets import DatasetDict
 from transformers import AutoModelForCausalLM
 
+from ptk.data.hf_adapter import to_hf_dataset_dict
+from ptk.data.table import TableDict
 from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
 from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokenizer
 
@@ -55,7 +56,8 @@ class _PPOValueModel(nn.Module):
 class PPOTrainerWrapper(BaseTrainer):
     """Proximal Policy Optimization with reward and value models."""
 
-    def train(self, dataset: DatasetDict, *, resume_from: Path | None = None) -> TrainerResult:
+    def train(self, dataset: TableDict, *, resume_from: Path | None = None) -> TrainerResult:
+        hf_data = to_hf_dataset_dict(dataset)
         assert self.config.training.rl is not None
         rl = self.config.training.rl
         assert rl.reward_model is not None
@@ -90,7 +92,7 @@ class PPOTrainerWrapper(BaseTrainer):
         def tokenize(example):
             return tokenizer(example["text"], truncation=True, max_length=t.max_seq_length)
 
-        train_ds = dataset["train"].map(tokenize, remove_columns=dataset["train"].column_names)
+        train_ds = hf_data["train"].map(tokenize, remove_columns=hf_data["train"].column_names)
 
         max_steps = t.max_iters or 2
         batch_size = max(1, t.batch_size * t.gradient_accumulation_steps)

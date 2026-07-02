@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from datasets import DatasetDict
 from transformers import AutoModelForCausalLM
 from trl import SFTConfig
 from trl import SFTTrainer as TRLSFTTrainer
 
+from ptk.data.hf_adapter import to_hf_dataset_dict
+from ptk.data.table import TableDict
 from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
 from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokenizer
 
@@ -16,7 +17,8 @@ from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokeni
 class SFTTrainerWrapper(BaseTrainer):
     """Standard SFT via TRL SFTTrainer."""
 
-    def train(self, dataset: DatasetDict, *, resume_from: Path | None = None) -> TrainerResult:
+    def train(self, dataset: TableDict, *, resume_from: Path | None = None) -> TrainerResult:
+        hf_data = to_hf_dataset_dict(dataset)
         self.logger.start("SFT training", model=self.config.base_model)
         tokenizer = prepare_tokenizer(self.config.base_model)
         device = torch_device_string(self.env.device)
@@ -58,8 +60,8 @@ class SFTTrainerWrapper(BaseTrainer):
         trainer = TRLSFTTrainer(
             model=model,
             args=sft_config,
-            train_dataset=dataset["train"],
-            eval_dataset=dataset.get("validation"),
+            train_dataset=hf_data["train"],
+            eval_dataset=hf_data.get("validation"),
             processing_class=tokenizer,
         )
 

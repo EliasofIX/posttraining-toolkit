@@ -23,22 +23,11 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "accelerate>=0.28.0",
-    "datasets>=2.18.0",
-    "huggingface-hub>=0.22.0",
-    "jinja2>=3.1.0",
-    "numpy>=1.24.0",
     "peft>=0.10.0",
     "pydantic>=2.6.0",
-    "pyyaml>=6.0",
-    "rich>=13.7.0",
-    "safetensors>=0.4.0",
-    "sentencepiece>=0.2.0",
-    "tokenizers>=0.15.0",
     "torch>=2.1.0",
     "transformers>=4.40.0",
     "trl>=0.8.0",
-    "typer>=0.12.0",
 ]
 
 [project.optional-dependencies]
@@ -54,12 +43,15 @@ dev = [
 gguf = [
     "gguf>=0.10.0",
 ]
+parquet = [
+    "pyarrow>=14.0.0",
+]
 all = [
-    "posttraining-toolkit[cuda,dev,gguf]",
+    "posttraining-toolkit[cuda,dev,gguf,parquet]",
 ]
 
 [project.scripts]
-ptk = "ptk.cli:app"
+ptk = "ptk.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/posttraining-toolkit/posttraining-toolkit"

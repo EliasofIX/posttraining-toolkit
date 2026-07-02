@@ -5,11 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from datasets import DatasetDict
-
 from ptk.config.schema import DataSource, PTKConfig
 from ptk.data.generation import generate_synthetic_data
 from ptk.data.pipeline import dataset_stats, hash_dataset, preprocess_dataset
+from ptk.data.table import Table, TableDict
 from ptk.distributed.detect import detect_environment
 from ptk.eval.harness import EvalHarness
 from ptk.export.formats import export_run
@@ -125,20 +124,17 @@ def run_pipeline(
         raise
 
 
-def _prepare_data(config: PTKConfig, logger: Logger, registry: RunRegistry, run_id: str) -> DatasetDict:
+def _prepare_data(config: PTKConfig, logger: Logger, registry: RunRegistry, run_id: str) -> TableDict:
     registry.update_run(run_id, status=RunStatus.DATA_GEN)
     data_cache = config.output_path() / "data_cache"
 
     if config.data.source == DataSource.SYNTHETIC:
         raw = generate_synthetic_data(config, logger)
         data_cache.mkdir(parents=True, exist_ok=True)
-        raw.save_to_disk(str(data_cache / "raw"))
-        from datasets import DatasetDict as DD
-        from datasets import load_from_disk
-
-        loaded = load_from_disk(str(data_cache / "raw"))
+        raw.save_jsonl(data_cache / "raw")
+        loaded = Table.load_jsonl(data_cache / "raw")
         split = loaded.train_test_split(test_size=0.1, seed=config.data.seed)
-        return DD({"train": split["train"], "validation": split["test"]})
+        return TableDict({"train": split["train"], "validation": split["test"]})
 
     logger.start("Loading dataset")
     dataset_dict = preprocess_dataset(config.data, config.method)

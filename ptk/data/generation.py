@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from datasets import Dataset
-
 from ptk.config.schema import PTKConfig
 from ptk.data.generators.base import get_generator
+from ptk.data.table import Table
 from ptk.logging import Logger
 
 
@@ -22,7 +21,7 @@ def load_seed_prompts(path: str | None) -> list[str]:
     return [line.strip() for line in lines if line.strip()]
 
 
-def generate_synthetic_data(config: PTKConfig, logger: Logger) -> Dataset:
+def generate_synthetic_data(config: PTKConfig, logger: Logger) -> Table:
     """Run synthetic data generation for a config."""
     assert config.data.synthetic is not None
     syn = config.data.synthetic

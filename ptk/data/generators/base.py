@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from datasets import Dataset
+from ptk.data.table import Table
 
 
 @runtime_checkable
 class DataGenerator(Protocol):
     """Pluggable synthetic data generation interface."""
 
-    def generate(self, seed_prompts: list[str], n_samples: int, **kwargs) -> Dataset: ...
+    def generate(self, seed_prompts: list[str], n_samples: int, **kwargs) -> Table: ...
 
 
 def get_generator(backend: str, **kwargs) -> DataGenerator:

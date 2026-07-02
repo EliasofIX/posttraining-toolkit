@@ -6,8 +6,7 @@ import os
 import time
 from typing import Any
 
-from datasets import Dataset
-
+from ptk.data.table import Table
 from ptk.exceptions import RuntimeError as PTKRuntimeError
 
 
@@ -26,7 +25,7 @@ class AnthropicGenerator:
         self.total_tokens = 0
         self.total_cost_usd = 0.0
 
-    def generate(self, seed_prompts: list[str], n_samples: int, **kwargs: Any) -> Dataset:
+    def generate(self, seed_prompts: list[str], n_samples: int, **kwargs: Any) -> Table:
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise PTKRuntimeError(
@@ -52,7 +51,7 @@ class AnthropicGenerator:
             records.append({"text": text})
             time.sleep(self.rate_limit_delay)
 
-        return Dataset.from_list(records)
+        return Table.from_records(records)
 
     def _generate_one(self, client: Any, seed: str) -> str:
         prompt = (

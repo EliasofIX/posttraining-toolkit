@@ -89,6 +89,18 @@ output:
   dir: ./outputs
 ```
 
+## Dependencies
+
+Core runtime dependencies are limited to the Hugging Face training stack:
+
+- `torch`, `transformers`, `trl`, `peft`, `pydantic`
+
+The toolkit implements its own YAML config I/O, CLI (`argparse`), terminal logging, in-memory data tables, safetensors reader, and Hugging Face Hub client. Optional extras:
+
+- `cuda` — bitsandbytes + DeepSpeed
+- `gguf` — GGUF export
+- `parquet` — Parquet dataset loading (`pyarrow`)
+
 ## Hardware Support
 
 - **NVIDIA CUDA** — full feature set including bitsandbytes QLoRA, DeepSpeed, multi-GPU/multi-node
@@ -127,7 +139,7 @@ Registry stored in `.ptk/registry/` by default. Set `PTK_S3_BUCKET` for S3-compa
 ## Testing
 
 ```bash
-pip install -e ".[dev,gguf]"
+pip install -e ".[dev,gguf,parquet]"
 pytest tests/ -v
 pytest tests/test_integration.py tests/test_gguf_export.py -v -m slow
 ```

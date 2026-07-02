@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from datasets import DatasetDict
 from transformers import AutoModelForCausalLM
 from trl import DPOConfig, DPOTrainer
 
+from ptk.data.hf_adapter import to_hf_dataset_dict
+from ptk.data.table import TableDict
 from ptk.distributed.detect import torch_device_string
 from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokenizer
 
@@ -15,7 +16,8 @@ from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokeni
 class DPOTrainerWrapper(BaseTrainer):
     """Direct Preference Optimization."""
 
-    def train(self, dataset: DatasetDict, *, resume_from: Path | None = None) -> TrainerResult:
+    def train(self, dataset: TableDict, *, resume_from: Path | None = None) -> TrainerResult:
+        hf_data = to_hf_dataset_dict(dataset)
         assert self.config.training.rl is not None
         rl = self.config.training.rl
         self.logger.start("DPO training", model=self.config.base_model, beta=rl.beta)
@@ -49,8 +51,8 @@ class DPOTrainerWrapper(BaseTrainer):
             model=model,
             ref_model=ref_model,
             args=dpo_config,
-            train_dataset=dataset["train"],
-            eval_dataset=dataset.get("validation"),
+            train_dataset=hf_data["train"],
+            eval_dataset=hf_data.get("validation"),
             processing_class=tokenizer,
         )
 

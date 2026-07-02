@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from datasets import DatasetDict
 from peft import LoraConfig, TaskType, get_peft_model
 from transformers import AutoModelForCausalLM
 from trl import SFTConfig
 from trl import SFTTrainer as TRLSFTTrainer
 
+from ptk.data.hf_adapter import to_hf_dataset_dict
+from ptk.data.table import TableDict
 from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
 from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokenizer
 
@@ -17,7 +18,8 @@ from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokeni
 class LoRATrainer(BaseTrainer):
     """LoRA adapter training via PEFT + TRL."""
 
-    def train(self, dataset: DatasetDict, *, resume_from: Path | None = None) -> TrainerResult:
+    def train(self, dataset: TableDict, *, resume_from: Path | None = None) -> TrainerResult:
+        hf_data = to_hf_dataset_dict(dataset)
         self.logger.start("LoRA training", model=self.config.base_model)
         assert self.config.training.lora is not None
         lora_cfg = self.config.training.lora
@@ -56,7 +58,7 @@ class LoRATrainer(BaseTrainer):
             learning_rate=t.learning_rate,
             logging_steps=t.logging_steps,
             save_steps=t.save_steps,
-            eval_strategy="steps" if "validation" in dataset else "no",
+            eval_strategy="steps" if "validation" in hf_data else "no",
             eval_steps=t.save_steps,
             report_to="none",
             max_steps=t.max_iters if t.max_iters else -1,
@@ -70,8 +72,8 @@ class LoRATrainer(BaseTrainer):
         trainer = TRLSFTTrainer(
             model=model,
             args=sft_config,
-            train_dataset=dataset["train"],
-            eval_dataset=dataset.get("validation"),
+            train_dataset=hf_data["train"],
+            eval_dataset=hf_data.get("validation"),
             processing_class=tokenizer,
         )
 

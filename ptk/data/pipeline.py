@@ -6,16 +6,15 @@ import hashlib
 import re
 from typing import Any
 
-from datasets import Dataset, DatasetDict
-
 from ptk.config.schema import DataConfig, SyntheticFilters, TrainingMethod
 from ptk.data.loaders import load_raw_dataset, normalize_dpo_columns, normalize_sft_columns
+from ptk.data.table import Table, TableDict
 
 
 def preprocess_dataset(
     config: DataConfig,
     method: TrainingMethod,
-) -> DatasetDict:
+) -> TableDict:
     """Full data pipeline: load → normalize → filter → dedup → split."""
     if config.source.value == "dataset":
         assert config.dataset is not None
@@ -34,11 +33,11 @@ def preprocess_dataset(
 
 
 def apply_filters(
-    dataset: Dataset,
+    dataset: Table,
     filters: SyntheticFilters,
     *,
     method: TrainingMethod,
-) -> Dataset:
+) -> Table:
     """Apply length and quality filters."""
 
     def score_quality(text: str) -> float:
@@ -66,7 +65,7 @@ def apply_filters(
     return dataset.filter(filter_fn)
 
 
-def deduplicate(dataset: Dataset, *, threshold: float = 0.95) -> Dataset:
+def deduplicate(dataset: Table, *, threshold: float = 0.95) -> Table:
     """Hash-based exact deduplication (embedding dedup at threshold≈1.0)."""
     seen: set[str] = set()
     keep_indices: list[int] = []
@@ -90,17 +89,17 @@ def _normalize_text(text: str) -> str:
 
 
 def split_dataset(
-    dataset: Dataset,
+    dataset: Table,
     *,
     train_ratio: float = 0.9,
     seed: int = 42,
-) -> DatasetDict:
+) -> TableDict:
     """Train/validation split."""
     split = dataset.train_test_split(test_size=1.0 - train_ratio, seed=seed)
-    return DatasetDict({"train": split["train"], "validation": split["test"]})
+    return TableDict({"train": split["train"], "validation": split["test"]})
 
 
-def dataset_stats(dataset_dict: DatasetDict) -> dict[str, Any]:
+def dataset_stats(dataset_dict: TableDict) -> dict[str, Any]:
     """Compute dataset statistics for planning."""
     stats: dict[str, Any] = {}
     for split_name, ds in dataset_dict.items():
@@ -111,7 +110,7 @@ def dataset_stats(dataset_dict: DatasetDict) -> dict[str, Any]:
     return stats
 
 
-def hash_dataset(dataset_dict: DatasetDict) -> str:
+def hash_dataset(dataset_dict: TableDict) -> str:
     """Deterministic hash of dataset content for registry."""
     h = hashlib.sha256()
     for split in sorted(dataset_dict.keys()):

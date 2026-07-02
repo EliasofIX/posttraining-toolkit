@@ -6,10 +6,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-import yaml
 from pydantic import ValidationError as PydanticValidationError
 
 from ptk.config.schema import PTKConfig
+from ptk.config.yaml_io import dump_yaml, load_yaml
 from ptk.exceptions import ValidationError
 
 
@@ -22,7 +22,7 @@ def load_config(path: str | Path) -> PTKConfig:
     raw = path.read_text(encoding="utf-8")
     suffix = path.suffix.lower()
     if suffix in (".yaml", ".yml"):
-        data = yaml.safe_load(raw)
+        data = load_yaml(raw)
     elif suffix == ".json":
         data = json.loads(raw)
     else:
@@ -60,9 +60,4 @@ def validate_config_dict(data: dict[str, Any]) -> PTKConfig:
 
 def config_to_yaml(config: PTKConfig) -> str:
     """Serialize config to YAML."""
-    return yaml.dump(
-        config.model_dump(mode="json"),
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
-    )
+    return dump_yaml(config.model_dump(mode="json"))

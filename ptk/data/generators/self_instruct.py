@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 import torch
-from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ptk.config.schema import DeviceType
+from ptk.data.table import Table
 from ptk.distributed.detect import detect_device, torch_device_string
 
 
@@ -25,7 +25,7 @@ class SelfInstructGenerator:
         self.max_new_tokens = max_new_tokens
         self.device = detect_device(device)
 
-    def generate(self, seed_prompts: list[str], n_samples: int, **kwargs: Any) -> Dataset:
+    def generate(self, seed_prompts: list[str], n_samples: int, **kwargs: Any) -> Table:
         device_str = torch_device_string(self.device)
         tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         if tokenizer.pad_token is None:
@@ -54,7 +54,7 @@ class SelfInstructGenerator:
         if not records:
             records.append({"text": "Instruction: What is fine-tuning?\nResponse: Fine-tuning adapts a pretrained model to a specific task."})
 
-        return Dataset.from_list(records)
+        return Table.from_records(records)
 
     def _generate_text(self, model, tokenizer, device: str, prompt: str) -> str:
         inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=256)

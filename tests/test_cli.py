@@ -1,51 +1,78 @@
 """CLI smoke tests."""
 
+from __future__ import annotations
+
+import sys
 from pathlib import Path
 
-from typer.testing import CliRunner
+from ptk.cli import CLIExit, main
 
-from ptk.cli import app
-
-runner = CliRunner()
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def invoke(args: list[str]) -> tuple[int, str]:
+    stdout = []
+    original_stdout = sys.stdout
+
+    class _Writer:
+        def write(self, text: str) -> int:
+            stdout.append(text)
+            return len(text)
+
+        def flush(self) -> None:
+            return None
+
+    sys.stdout = _Writer()  # type: ignore[assignment]
+    try:
+        try:
+            main(args)
+            code = 0
+        except CLIExit as exc:
+            code = exc.code
+        except SystemExit as exc:
+            code = exc.code if isinstance(exc.code, int) else 1
+    finally:
+        sys.stdout = original_stdout
+    return code, "".join(stdout)
+
+
 def test_cli_version():
-    result = runner.invoke(app, ["--version"])
-    assert result.exit_code == 0
-    assert "ptk" in result.stdout
+    code, output = invoke(["--version"])
+    assert code == 0
+    assert "ptk" in output
 
 
 def test_cli_validate():
-    result = runner.invoke(app, ["validate", str(FIXTURES / "sft.yaml")])
-    assert result.exit_code == 0
+    code, _ = invoke(["validate", str(FIXTURES / "sft.yaml")])
+    assert code == 0
 
 
 def test_cli_validate_json():
-    result = runner.invoke(app, ["validate", str(FIXTURES / "sft.yaml"), "--json"])
-    assert result.exit_code == 0
-    assert "valid" in result.stdout
+    code, output = invoke(["validate", str(FIXTURES / "sft.yaml"), "--json"])
+    assert code == 0
+    assert "valid" in output
 
 
 def test_cli_plan():
-    result = runner.invoke(app, ["plan", str(FIXTURES / "sft.yaml"), "--json"])
-    assert result.exit_code == 0
-    assert "estimated_steps" in result.stdout
+    code, output = invoke(["plan", str(FIXTURES / "sft.yaml"), "--json"])
+    assert code == 0
+    assert "estimated_steps" in output
 
 
 def test_cli_schema():
-    result = runner.invoke(app, ["schema"])
-    assert result.exit_code == 0
-    assert "run_name" in result.stdout
+    code, output = invoke(["schema"])
+    assert code == 0
+    assert "run_name" in output
 
 
 def test_cli_init(tmp_path):
     out = tmp_path / "config.yaml"
-    result = runner.invoke(app, ["init", "--method", "sft", "--output", str(out)])
-    assert result.exit_code == 0
+    code, _ = invoke(["init", "--method", "sft", "--output", str(out)])
+    assert code == 0
     assert out.exists()
 
 
 def test_cli_list():
-    result = runner.invoke(app, ["list", "--json"])
-    assert result.exit_code == 0
+    code, output = invoke(["list", "--json"])
+    assert code == 0
+    assert output.startswith("[")

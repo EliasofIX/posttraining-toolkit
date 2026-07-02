@@ -7,13 +7,14 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from datasets import DatasetDict
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 from trl import SFTConfig
 from trl import SFTTrainer as TRLSFTTrainer
 
 from ptk.config.schema import DeviceType, QuantBackend
+from ptk.data.hf_adapter import to_hf_dataset_dict
+from ptk.data.table import TableDict
 from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
 from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokenizer
 
@@ -32,7 +33,8 @@ def resolve_quantization_backend(device: DeviceType, requested: QuantBackend) ->
 class QLoRATrainer(BaseTrainer):
     """QLoRA with bitsandbytes on CUDA and MPS-compatible fallback."""
 
-    def train(self, dataset: DatasetDict, *, resume_from: Path | None = None) -> TrainerResult:
+    def train(self, dataset: TableDict, *, resume_from: Path | None = None) -> TrainerResult:
+        hf_data = to_hf_dataset_dict(dataset)
         assert self.config.training.lora is not None
         assert self.config.training.quantization is not None
         quant = self.config.training.quantization
@@ -109,8 +111,8 @@ class QLoRATrainer(BaseTrainer):
         trainer = TRLSFTTrainer(
             model=model,
             args=sft_config,
-            train_dataset=dataset["train"],
-            eval_dataset=dataset.get("validation"),
+            train_dataset=hf_data["train"],
+            eval_dataset=hf_data.get("validation"),
             processing_class=tokenizer,
         )
 

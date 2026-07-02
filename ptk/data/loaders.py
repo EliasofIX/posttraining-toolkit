@@ -2,36 +2,85 @@
 
 from __future__ import annotations
 
+import csv
+import json
+import tempfile
 from pathlib import Path
 
-from datasets import Dataset, load_dataset
-
 from ptk.config.schema import DatasetConfig, DatasetFormat
+from ptk.data.table import Table
 from ptk.exceptions import ValidationError
+from ptk.hub.client import HubClient
 
 
-def load_raw_dataset(config: DatasetConfig) -> Dataset:
+def load_raw_dataset(config: DatasetConfig) -> Table:
     """Load a dataset from the configured source."""
     path = config.path
     fmt = config.format
 
     if fmt == DatasetFormat.HF_HUB:
-        return load_dataset(path, split="train")
+        return _load_hf_hub(path)
 
     if not Path(path).exists():
         raise ValidationError(f"Dataset path not found: {path}", field_path="data.dataset.path")
 
     if fmt == DatasetFormat.JSONL:
-        return load_dataset("json", data_files=path, split="train")
+        return _load_jsonl(Path(path))
     if fmt == DatasetFormat.CSV:
-        return load_dataset("csv", data_files=path, split="train")
+        return _load_csv(Path(path))
     if fmt == DatasetFormat.PARQUET:
-        return load_dataset("parquet", data_files=path, split="train")
+        return _load_parquet(Path(path))
 
     raise ValidationError(f"Unsupported dataset format: {fmt}", field_path="data.dataset.format")
 
 
-def normalize_sft_columns(dataset: Dataset, config: DatasetConfig) -> Dataset:
+def _load_jsonl(path: Path) -> Table:
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return Table.from_records(rows)
+
+
+def _load_csv(path: Path) -> Table:
+    with path.open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        return Table.from_records(list(reader))
+
+
+def _load_parquet(path: Path) -> Table:
+    try:
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise ValidationError(
+            "Parquet support requires pyarrow: pip install pyarrow",
+            field_path="data.dataset.format",
+        ) from exc
+    table = pq.read_table(path)
+    return Table.from_dict(table.to_pydict())
+
+
+def _load_hf_hub(repo_id: str) -> Table:
+    client = HubClient()
+    for candidate in ("train.jsonl", "data.jsonl", "train.csv"):
+        try:
+            payload = client.download_repo_files(repo_id, filename=candidate)
+        except Exception:
+            continue
+        suffix = candidate.rsplit(".", 1)[-1]
+        with tempfile.NamedTemporaryFile(suffix=f".{suffix}", delete=False) as tmp:
+            tmp.write(payload)
+            tmp_path = Path(tmp.name)
+        try:
+            if suffix == "jsonl":
+                return _load_jsonl(tmp_path)
+            return _load_csv(tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    raise ValidationError(
+        f"Could not load dataset from Hugging Face repo: {repo_id}",
+        field_path="data.dataset.path",
+    )
+
+
+def normalize_sft_columns(dataset: Table, config: DatasetConfig) -> Table:
     """Normalize dataset to text column for SFT."""
     col = config.text_column
     if col in dataset.column_names:
@@ -52,7 +101,7 @@ def normalize_sft_columns(dataset: Dataset, config: DatasetConfig) -> Dataset:
     )
 
 
-def normalize_dpo_columns(dataset: Dataset, config: DatasetConfig) -> Dataset:
+def normalize_dpo_columns(dataset: Table, config: DatasetConfig) -> Table:
     """Ensure DPO-required columns exist."""
     required = {
         "prompt": config.prompt_column or "prompt",
