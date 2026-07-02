@@ -23,3 +23,10 @@ def test_split_dataset():
     split = split_dataset(ds, train_ratio=0.8, seed=42)
     assert len(split["train"]) == 80
     assert len(split["validation"]) == 20
+
+
+def test_split_dataset_single_row():
+    ds = Table.from_dict({"text": ["only sample"]})
+    split = split_dataset(ds, train_ratio=0.9, seed=42)
+    assert len(split["train"]) == 1
+    assert len(split["validation"]) == 0

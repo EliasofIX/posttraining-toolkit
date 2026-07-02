@@ -21,7 +21,11 @@ class Table:
         if not data:
             return cls([], [])
         columns = list(data.keys())
-        length = len(next(iter(data.values())))
+        lengths = {col: len(data[col]) for col in columns}
+        unique_lengths = set(lengths.values())
+        if len(unique_lengths) != 1:
+            raise ValueError(f"All columns must have equal length, got: {lengths}")
+        length = next(iter(unique_lengths))
         rows = [{col: data[col][i] for col in columns} for i in range(length)]
         return cls(columns, rows)
 
@@ -81,10 +85,13 @@ class Table:
         seed: int = 42,
     ) -> dict[str, Table]:
         indices = list(range(len(self._rows)))
+        if len(indices) <= 1:
+            return {"train": self.select(indices), "test": self.select([])}
+
         rng = random.Random(seed)
         rng.shuffle(indices)
-        test_count = max(1, round(len(indices) * test_size)) if indices else 0
-        if test_count >= len(indices) and len(indices) > 1:
+        test_count = max(1, round(len(indices) * test_size))
+        if test_count >= len(indices):
             test_count = len(indices) - 1
         test_idx = set(indices[:test_count])
         train_indices = [i for i in indices if i not in test_idx]

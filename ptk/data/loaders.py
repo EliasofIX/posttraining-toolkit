@@ -5,12 +5,16 @@ from __future__ import annotations
 import csv
 import json
 import tempfile
+import urllib.error
 from pathlib import Path
 
 from ptk.config.schema import DatasetConfig, DatasetFormat
 from ptk.data.table import Table
 from ptk.exceptions import ValidationError
 from ptk.hub.client import HubClient
+
+# Tried in order; validation.jsonl is a last-resort fallback when no train file exists.
+_HF_HUB_CANDIDATES = ("train.jsonl", "data.jsonl", "train.csv", "validation.jsonl")
 
 
 def load_raw_dataset(config: DatasetConfig) -> Table:
@@ -54,16 +58,35 @@ def _load_parquet(path: Path) -> Table:
             field_path="data.dataset.format",
         ) from exc
     table = pq.read_table(path)
-    return Table.from_dict(table.to_pydict())
+    try:
+        return Table.from_dict(table.to_pydict())
+    except ValueError as exc:
+        raise ValidationError(str(exc), field_path="data.dataset.path") from exc
 
 
 def _load_hf_hub(repo_id: str) -> Table:
     client = HubClient()
-    for candidate in ("train.jsonl", "data.jsonl", "train.csv"):
+    for candidate in _HF_HUB_CANDIDATES:
         try:
-            payload = client.download_repo_files(repo_id, filename=candidate)
-        except Exception:
-            continue
+            payload = client.download_repo_files(repo_id, filename=candidate, repo_type="dataset")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                continue
+            if exc.code in (401, 403):
+                raise ValidationError(
+                    f"Authentication required for Hugging Face repo: {repo_id}",
+                    field_path="data.dataset.path",
+                ) from exc
+            raise ValidationError(
+                f"Failed to download {candidate} from Hugging Face repo {repo_id}: HTTP {exc.code}",
+                field_path="data.dataset.path",
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise ValidationError(
+                f"Failed to download from Hugging Face repo {repo_id}: {exc.reason}",
+                field_path="data.dataset.path",
+            ) from exc
+
         suffix = candidate.rsplit(".", 1)[-1]
         with tempfile.NamedTemporaryFile(suffix=f".{suffix}", delete=False) as tmp:
             tmp.write(payload)
@@ -74,8 +97,10 @@ def _load_hf_hub(repo_id: str) -> Table:
             return _load_csv(tmp_path)
         finally:
             tmp_path.unlink(missing_ok=True)
+
     raise ValidationError(
-        f"Could not load dataset from Hugging Face repo: {repo_id}",
+        f"Could not load dataset from Hugging Face repo: {repo_id}."
+        f" Tried: {', '.join(_HF_HUB_CANDIDATES)}.",
         field_path="data.dataset.path",
     )
 
