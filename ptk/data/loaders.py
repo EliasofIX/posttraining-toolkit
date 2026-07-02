@@ -13,7 +13,8 @@ from ptk.data.table import Table
 from ptk.exceptions import ValidationError
 from ptk.hub.client import HubClient
 
-_HF_HUB_CANDIDATES = ("train.jsonl", "data.jsonl", "validation.jsonl", "train.csv")
+# Tried in order; validation.jsonl is a last-resort fallback when no train file exists.
+_HF_HUB_CANDIDATES = ("train.jsonl", "data.jsonl", "train.csv", "validation.jsonl")
 
 
 def load_raw_dataset(config: DatasetConfig) -> Table:
@@ -57,15 +58,17 @@ def _load_parquet(path: Path) -> Table:
             field_path="data.dataset.format",
         ) from exc
     table = pq.read_table(path)
-    return Table.from_dict(table.to_pydict())
+    try:
+        return Table.from_dict(table.to_pydict())
+    except ValueError as exc:
+        raise ValidationError(str(exc), field_path="data.dataset.path") from exc
 
 
 def _load_hf_hub(repo_id: str) -> Table:
     client = HubClient()
-    last_error: str | None = None
     for candidate in _HF_HUB_CANDIDATES:
         try:
-            payload = client.download_repo_files(repo_id, filename=candidate)
+            payload = client.download_repo_files(repo_id, filename=candidate, repo_type="dataset")
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
                 continue
@@ -74,8 +77,10 @@ def _load_hf_hub(repo_id: str) -> Table:
                     f"Authentication required for Hugging Face repo: {repo_id}",
                     field_path="data.dataset.path",
                 ) from exc
-            last_error = f"{candidate}: HTTP {exc.code}"
-            continue
+            raise ValidationError(
+                f"Failed to download {candidate} from Hugging Face repo {repo_id}: HTTP {exc.code}",
+                field_path="data.dataset.path",
+            ) from exc
         except urllib.error.URLError as exc:
             raise ValidationError(
                 f"Failed to download from Hugging Face repo {repo_id}: {exc.reason}",
@@ -93,11 +98,9 @@ def _load_hf_hub(repo_id: str) -> Table:
         finally:
             tmp_path.unlink(missing_ok=True)
 
-    detail = f" Tried: {', '.join(_HF_HUB_CANDIDATES)}."
-    if last_error:
-        detail += f" Last error: {last_error}"
     raise ValidationError(
-        f"Could not load dataset from Hugging Face repo: {repo_id}.{detail}",
+        f"Could not load dataset from Hugging Face repo: {repo_id}."
+        f" Tried: {', '.join(_HF_HUB_CANDIDATES)}.",
         field_path="data.dataset.path",
     )
 

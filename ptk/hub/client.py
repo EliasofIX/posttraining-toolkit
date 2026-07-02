@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import os
 import urllib.error
 import urllib.request
@@ -16,6 +17,7 @@ _LFS_HEADERS = {
     "Content-Type": "application/vnd.git-lfs+json",
 }
 _PREUPLOAD_CHUNK = 256
+_READ_CHUNK = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -43,7 +45,9 @@ class HubClient:
         try:
             self._request_json("POST", url, json.dumps(payload).encode())
         except urllib.error.HTTPError as exc:
-            if exist_ok and exc.code in (409, 400):
+            if exist_ok and exc.code == 409:
+                return
+            if exist_ok and exc.code == 400 and _is_repo_already_exists_error(exc):
                 return
             raise
 
@@ -98,11 +102,18 @@ class HubClient:
         body = _build_ndjson_commit(commit_ops, summary="Upload from posttraining-toolkit")
         self._request_ndjson("POST", url, body)
 
-    def download_repo_files(self, repo_id: str, *, filename: str | None = None) -> bytes:
-        """Download a single file from a model repo."""
+    def download_repo_files(
+        self,
+        repo_id: str,
+        *,
+        filename: str | None = None,
+        repo_type: str = "model",
+    ) -> bytes:
+        """Download a single file from a Hub repo (model, dataset, or space)."""
         if filename is None:
             filename = "train.jsonl"
-        url = f"{self.endpoint}/{repo_id}/resolve/main/{filename}"
+        prefix = _repo_resolve_prefix(repo_type)
+        url = f"{self.endpoint}/{prefix}{repo_id}/resolve/main/{filename}"
         request = urllib.request.Request(url, headers=self._headers(content_type=None))
         with urllib.request.urlopen(request, timeout=120) as response:
             return response.read()
@@ -131,7 +142,7 @@ class HubClient:
         batch_url = f"{self.endpoint}/{_repo_lfs_prefix(repo_type)}{repo_id}.git/info/lfs/objects/batch"
         payload = {
             "operation": "upload",
-            "transfers": ["basic"],
+            "transfers": ["basic", "multipart"],
             "objects": [{"oid": file.sha256.hex(), "size": file.size} for file in files],
             "hash_algo": "sha256",
             "ref": {"name": "main"},
@@ -153,28 +164,94 @@ class HubClient:
             upload_action = actions.get("upload")
             if upload_action is None:
                 continue
-            file = oid_to_file[item["oid"]]
-            upload_url = upload_action["href"]
-            upload_headers = upload_action.get("header") or {}
-            request = urllib.request.Request(
-                upload_url,
-                data=file.abs_path.read_bytes(),
-                headers={**upload_headers, **self._headers(content_type=None)},
-                method=upload_action.get("method", "PUT"),
-            )
+            oid = item.get("oid")
+            if not isinstance(oid, str):
+                raise RuntimeError("LFS batch response missing oid")
+            file = oid_to_file.get(oid)
+            if file is None:
+                raise RuntimeError(f"LFS batch returned unknown oid: {oid}")
+            self._upload_lfs_file(file, upload_action, actions.get("verify"))
+
+    def _upload_lfs_file(
+        self,
+        file: _FileUpload,
+        upload_action: dict,
+        verify_action: dict | None,
+    ) -> None:
+        upload_url = upload_action["href"]
+        upload_headers = upload_action.get("header") or {}
+        chunk_size = upload_headers.get("chunk_size")
+        if chunk_size is not None:
+            try:
+                parsed_chunk_size = int(chunk_size)
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    f"LFS multipart chunk_size must be an integer, got {chunk_size!r}"
+                ) from exc
+            self._upload_lfs_multipart(file, upload_url, upload_headers, parsed_chunk_size)
+        else:
+            self._upload_lfs_single(file, upload_url, upload_headers, upload_action.get("method", "PUT"))
+        if verify_action is not None:
+            self._verify_lfs_upload(file, verify_action)
+
+    def _upload_lfs_single(
+        self,
+        file: _FileUpload,
+        upload_url: str,
+        upload_headers: dict[str, str],
+        method: str,
+    ) -> None:
+        headers = {**upload_headers, **self._headers(content_type=None)}
+        with file.abs_path.open("rb") as handle:
+            request = urllib.request.Request(upload_url, data=handle, headers=headers, method=method)
             with urllib.request.urlopen(request, timeout=300) as http_response:
                 http_response.read()
-            verify_action = actions.get("verify")
-            if verify_action is not None:
-                verify_payload = json.dumps({"oid": file.sha256.hex(), "size": file.size}).encode()
-                verify_request = urllib.request.Request(
-                    verify_action["href"],
-                    data=verify_payload,
-                    headers=self._headers(),
-                    method=verify_action.get("method", "POST"),
+
+    def _upload_lfs_multipart(
+        self,
+        file: _FileUpload,
+        completion_url: str,
+        upload_headers: dict[str, str],
+        chunk_size: int,
+    ) -> None:
+        part_urls = _sorted_part_upload_urls(upload_headers, file.size, chunk_size)
+        response_headers: list[dict[str, str]] = []
+        with file.abs_path.open("rb") as handle:
+            for part_idx, part_url in enumerate(part_urls):
+                handle.seek(part_idx * chunk_size)
+                chunk = handle.read(chunk_size)
+                request = urllib.request.Request(
+                    part_url,
+                    data=chunk,
+                    headers=self._headers(content_type=None),
+                    method="PUT",
                 )
-                with urllib.request.urlopen(verify_request, timeout=120) as verify_response:
-                    verify_response.read()
+                with urllib.request.urlopen(request, timeout=300) as part_response:
+                    part_response.read()
+                    response_headers.append(dict(part_response.headers))
+
+        completion_payload = _lfs_multipart_completion_payload(response_headers, file.sha256.hex())
+        completion_request = urllib.request.Request(
+            completion_url,
+            data=json.dumps(completion_payload).encode(),
+            headers={**_LFS_HEADERS, **self._headers(content_type=None)},
+            method="POST",
+        )
+        with urllib.request.urlopen(completion_request, timeout=300) as completion_response:
+            completion_response.read()
+
+    def _verify_lfs_upload(self, file: _FileUpload, verify_action: dict) -> None:
+        verify_headers = verify_action.get("header") or {}
+        verify_payload = json.dumps({"oid": file.sha256.hex(), "size": file.size}).encode()
+        headers = {**_LFS_HEADERS, **self._headers(content_type=None), **verify_headers}
+        verify_request = urllib.request.Request(
+            verify_action["href"],
+            data=verify_payload,
+            headers=headers,
+            method=verify_action.get("method", "POST"),
+        )
+        with urllib.request.urlopen(verify_request, timeout=120) as verify_response:
+            verify_response.read()
 
     def _headers(self, *, content_type: str | None = "application/json") -> dict[str, str]:
         headers = {"User-Agent": "posttraining-toolkit"}
@@ -229,15 +306,65 @@ def _repo_lfs_prefix(repo_type: str) -> str:
     return ""
 
 
+def _repo_resolve_prefix(repo_type: str) -> str:
+    return _repo_lfs_prefix(repo_type)
+
+
+def _is_repo_already_exists_error(exc: urllib.error.HTTPError) -> bool:
+    try:
+        body = exc.read().decode()
+        payload = json.loads(body)
+        message = str(payload.get("error", body)).lower()
+    except Exception:
+        message = str(exc).lower()
+    return "already" in message and "repo" in message
+
+
 def _file_upload(abs_path: Path, rel_path: str) -> _FileUpload:
-    data = abs_path.read_bytes()
+    size = abs_path.stat().st_size
+    hasher = hashlib.sha256()
+    sample = b""
+    with abs_path.open("rb") as handle:
+        while True:
+            chunk = handle.read(_READ_CHUNK)
+            if not chunk:
+                break
+            if len(sample) < 512:
+                sample = (sample + chunk)[:512]
+            hasher.update(chunk)
     return _FileUpload(
         path=rel_path,
         abs_path=abs_path,
-        size=len(data),
-        sha256=hashlib.sha256(data).digest(),
-        sample=data[:512],
+        size=size,
+        sha256=hasher.digest(),
+        sample=sample,
     )
+
+
+def _sorted_part_upload_urls(header: dict[str, str], file_size: int, chunk_size: int) -> list[str]:
+    part_urls = [
+        url
+        for _, url in sorted(
+            ((int(part_num, 10), url) for part_num, url in header.items() if part_num.isdigit()),
+            key=lambda item: item[0],
+        )
+    ]
+    expected_parts = math.ceil(file_size / chunk_size) if file_size else 0
+    if len(part_urls) != expected_parts:
+        raise RuntimeError(
+            f"LFS multipart response has {len(part_urls)} parts, expected {expected_parts}"
+        )
+    return part_urls
+
+
+def _lfs_multipart_completion_payload(response_headers: list[dict[str, str]], oid: str) -> dict:
+    parts: list[dict[str, object]] = []
+    for part_number, header in enumerate(response_headers, start=1):
+        etag = header.get("etag") or header.get("ETag")
+        if not etag:
+            raise RuntimeError(f"LFS multipart upload missing etag for part {part_number}")
+        parts.append({"partNumber": part_number, "etag": etag.strip('"')})
+    return {"oid": oid, "parts": parts}
 
 
 def _build_ndjson_commit(operations: list[dict], *, summary: str) -> bytes:
