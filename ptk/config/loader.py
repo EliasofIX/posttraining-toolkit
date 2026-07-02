@@ -22,9 +22,15 @@ def load_config(path: str | Path) -> PTKConfig:
     raw = path.read_text(encoding="utf-8")
     suffix = path.suffix.lower()
     if suffix in (".yaml", ".yml"):
-        data = load_yaml(raw)
+        try:
+            data = load_yaml(raw)
+        except ValueError as exc:
+            raise ValidationError(str(exc), field_path="config_path") from exc
     elif suffix == ".json":
-        data = json.loads(raw)
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValidationError(f"Invalid JSON config: {exc.msg}", field_path="config_path") from exc
     else:
         raise ValidationError(
             f"Unsupported config format: {suffix}. Use .yaml, .yml, or .json",

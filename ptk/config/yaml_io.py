@@ -5,16 +5,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-_SCALAR_RE = re.compile(
-    r"^(?P<value>"
-    r"null|true|false|"
-    r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|"
-    r"'(?:[^'\\]|\\.)*'|"
-    r'"(?:[^"\\]|\\.)*"|'
-    r"[^#'\"]+?"
-    r")\s*(?:#.*)?$"
-)
-
 
 def load_yaml(text: str) -> Any:
     """Parse a YAML document into Python objects."""
@@ -114,7 +104,10 @@ def _parse_list(lines: list[str], start: int, indent: int) -> tuple[list[Any], i
 
 
 def _leading_spaces(line: str) -> int:
-    return len(line) - len(line.lstrip(" "))
+    if "\t" in line[: len(line) - len(line.lstrip("\t "))]:
+        raise ValueError("Tabs are not supported for YAML indentation; use spaces")
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip(" "))
 
 
 def _line_content(line: str) -> str:

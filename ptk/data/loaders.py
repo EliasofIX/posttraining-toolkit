@@ -5,12 +5,15 @@ from __future__ import annotations
 import csv
 import json
 import tempfile
+import urllib.error
 from pathlib import Path
 
 from ptk.config.schema import DatasetConfig, DatasetFormat
 from ptk.data.table import Table
 from ptk.exceptions import ValidationError
 from ptk.hub.client import HubClient
+
+_HF_HUB_CANDIDATES = ("train.jsonl", "data.jsonl", "validation.jsonl", "train.csv")
 
 
 def load_raw_dataset(config: DatasetConfig) -> Table:
@@ -59,11 +62,26 @@ def _load_parquet(path: Path) -> Table:
 
 def _load_hf_hub(repo_id: str) -> Table:
     client = HubClient()
-    for candidate in ("train.jsonl", "data.jsonl", "train.csv"):
+    last_error: str | None = None
+    for candidate in _HF_HUB_CANDIDATES:
         try:
             payload = client.download_repo_files(repo_id, filename=candidate)
-        except Exception:
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                continue
+            if exc.code in (401, 403):
+                raise ValidationError(
+                    f"Authentication required for Hugging Face repo: {repo_id}",
+                    field_path="data.dataset.path",
+                ) from exc
+            last_error = f"{candidate}: HTTP {exc.code}"
             continue
+        except urllib.error.URLError as exc:
+            raise ValidationError(
+                f"Failed to download from Hugging Face repo {repo_id}: {exc.reason}",
+                field_path="data.dataset.path",
+            ) from exc
+
         suffix = candidate.rsplit(".", 1)[-1]
         with tempfile.NamedTemporaryFile(suffix=f".{suffix}", delete=False) as tmp:
             tmp.write(payload)
@@ -74,8 +92,12 @@ def _load_hf_hub(repo_id: str) -> Table:
             return _load_csv(tmp_path)
         finally:
             tmp_path.unlink(missing_ok=True)
+
+    detail = f" Tried: {', '.join(_HF_HUB_CANDIDATES)}."
+    if last_error:
+        detail += f" Last error: {last_error}"
     raise ValidationError(
-        f"Could not load dataset from Hugging Face repo: {repo_id}",
+        f"Could not load dataset from Hugging Face repo: {repo_id}.{detail}",
         field_path="data.dataset.path",
     )
 
