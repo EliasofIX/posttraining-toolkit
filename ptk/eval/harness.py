@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
 from ptk.config.schema import PTKConfig
 from ptk.distributed.detect import detect_environment, torch_device_string
@@ -63,6 +63,37 @@ class EvalHarness:
             model.to(device)
         model.eval()
 
+        return self._run_benchmarks(config, model, tokenizer, device, bench_list, model_path=model_path)
+
+    def run_with_model(
+        self,
+        config: PTKConfig,
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase,
+        *,
+        benchmarks: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Run benchmarks on an in-memory model without reloading weights."""
+        bench_list = benchmarks or config.eval.benchmarks
+        if not bench_list:
+            return {"benchmarks": {}, "model": "in-memory", "timestamp": time.time()}
+
+        env = detect_environment(device=config.compute.device, strategy=config.compute.strategy)
+        device = torch_device_string(env.device)
+        self.logger.start("Evaluation", benchmarks=bench_list, model="in-memory")
+        model.eval()
+        return self._run_benchmarks(config, model, tokenizer, device, bench_list, model_path="in-memory")
+
+    def _run_benchmarks(
+        self,
+        config: PTKConfig,
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase,
+        device: str,
+        bench_list: list[str],
+        *,
+        model_path: str,
+    ) -> dict[str, Any]:
         results: dict[str, Any] = {"benchmarks": {}, "model": model_path, "timestamp": time.time()}
         max_samples = config.eval.max_samples
 

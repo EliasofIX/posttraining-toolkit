@@ -11,8 +11,7 @@ from trl import SFTTrainer as TRLSFTTrainer
 
 from ptk.data.hf_adapter import to_hf_dataset_dict
 from ptk.data.table import TableDict
-from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
-from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokenizer
+from ptk.training.base_trainer import BaseTrainer, TrainerResult, place_model, prepare_tokenizer
 
 
 class LoRATrainer(BaseTrainer):
@@ -24,14 +23,12 @@ class LoRATrainer(BaseTrainer):
         assert self.config.training.lora is not None
         lora_cfg = self.config.training.lora
         tokenizer = prepare_tokenizer(self.config.base_model)
-        device = torch_device_string(self.env.device)
 
         model = AutoModelForCausalLM.from_pretrained(
             self.config.base_model,
             trust_remote_code=True,
         )
-        if device != "cpu":
-            model.to(device)
+        model = place_model(model, self.env)
 
         target_modules = lora_cfg.target_modules
         if not target_modules:
@@ -47,27 +44,7 @@ class LoRATrainer(BaseTrainer):
         )
         model = get_peft_model(model, peft_config)
 
-        t = self.config.training
-        precision = resolve_mixed_precision(self.env.device, self.config.compute.mixed_precision)
-        use_cpu = device == "cpu"
-        sft_config = SFTConfig(
-            output_dir=str(self.output_dir),
-            num_train_epochs=t.epochs,
-            per_device_train_batch_size=t.batch_size,
-            gradient_accumulation_steps=t.gradient_accumulation_steps,
-            learning_rate=t.learning_rate,
-            logging_steps=t.logging_steps,
-            save_steps=t.save_steps,
-            eval_strategy="steps" if "validation" in hf_data else "no",
-            eval_steps=t.save_steps,
-            report_to="none",
-            max_steps=t.max_iters if t.max_iters else -1,
-            max_length=t.max_seq_length,
-            dataset_text_field="text",
-            use_cpu=use_cpu,
-            fp16=precision == "fp16",
-            bf16=precision == "bf16",
-        )
+        sft_config = SFTConfig(**self.build_sft_config_kwargs(has_validation="validation" in hf_data))
 
         trainer = TRLSFTTrainer(
             model=model,
@@ -84,12 +61,13 @@ class LoRATrainer(BaseTrainer):
 
         final_path = self.output_dir / "final"
         trainer.save_model(str(final_path))
-        model.save_pretrained(str(final_path))
 
         result = TrainerResult(
             output_dir=self.output_dir,
             checkpoint_path=final_path,
             global_step=trainer.state.global_step,
+            model=trainer.model,
+            tokenizer=tokenizer,
         )
         self.save_training_metadata(result)
         self.logger.complete("LoRA training complete", step=result.global_step)

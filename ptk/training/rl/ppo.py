@@ -11,7 +11,14 @@ from transformers import AutoModelForCausalLM
 from ptk.data.hf_adapter import to_hf_dataset_dict
 from ptk.data.table import TableDict
 from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
-from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokenizer
+from ptk.training.base_trainer import (
+    BaseTrainer,
+    TrainerResult,
+    dataset_map_kwargs,
+    dataloader_kwargs,
+    is_distributed,
+    prepare_tokenizer,
+)
 
 os.environ.setdefault("TRL_EXPERIMENTAL_SILENCE", "1")
 
@@ -23,15 +30,18 @@ from trl.experimental.ppo import (  # noqa: E402
 
 
 class _PPORewardModel(nn.Module):
-    """GPT-2 compatible reward model sharing the policy tokenizer vocabulary."""
+    """GPT-2 compatible reward model sharing the policy backbone."""
 
     base_model_prefix = "transformer"
 
-    def __init__(self, model_name: str) -> None:
+    def __init__(self, backbone: nn.Module) -> None:
         super().__init__()
-        backbone = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
         self.transformer = backbone.get_decoder() if hasattr(backbone, "get_decoder") else backbone.transformer
-        hidden = backbone.config.hidden_size if hasattr(backbone.config, "hidden_size") else backbone.config.n_embd
+        hidden = (
+            backbone.config.hidden_size
+            if hasattr(backbone.config, "hidden_size")
+            else backbone.config.n_embd
+        )
         self.score = nn.Linear(hidden, 1)
 
     def forward(self, *args, **kwargs):
@@ -67,12 +77,9 @@ class PPOTrainerWrapper(BaseTrainer):
         t = self.config.training
         precision = resolve_mixed_precision(self.env.device, self.config.compute.mixed_precision)
         use_cpu = device == "cpu"
+        distributed = is_distributed(self.env)
 
         tokenizer = prepare_tokenizer(self.config.base_model)
-
-        policy = AutoModelForCausalLM.from_pretrained(self.config.base_model, trust_remote_code=True)
-        if device != "cpu":
-            policy.to(device)
 
         if rl.reward_model != self.config.base_model:
             self.logger.warn(
@@ -80,19 +87,27 @@ class PPOTrainerWrapper(BaseTrainer):
                 configured=rl.reward_model,
                 using=self.config.base_model,
             )
-        reward_model = _PPORewardModel(self.config.base_model)
-        if device != "cpu":
-            reward_model.to(device)
 
-        value_model = _PPOValueModel(AutoModelForCausalLMWithValueHead.from_pretrained(self.config.base_model))
-        if device != "cpu":
+        backbone = AutoModelForCausalLM.from_pretrained(self.config.base_model, trust_remote_code=True)
+        policy = backbone
+        reward_model = _PPORewardModel(backbone)
+        value_wrapped = AutoModelForCausalLMWithValueHead(backbone)
+        value_model = _PPOValueModel(value_wrapped)
+
+        if not distributed and device != "cpu":
+            policy.to(device)
+            reward_model.to(device)
             value_model.pretrained_model.to(device)
             value_model._v_head.to(device)
 
         def tokenize(example):
             return tokenizer(example["text"], truncation=True, max_length=t.max_seq_length)
 
-        train_ds = hf_data["train"].map(tokenize, remove_columns=hf_data["train"].column_names)
+        train_ds = hf_data["train"].map(
+            tokenize,
+            remove_columns=hf_data["train"].column_names,
+            **dataset_map_kwargs(t),
+        )
 
         max_steps = t.max_iters or 2
         batch_size = max(1, t.batch_size * t.gradient_accumulation_steps)
@@ -112,7 +127,8 @@ class PPOTrainerWrapper(BaseTrainer):
             use_cpu=use_cpu,
             fp16=precision == "fp16",
             bf16=precision == "bf16",
-            gradient_checkpointing=False,
+            gradient_checkpointing=t.gradient_checkpointing,
+            **dataloader_kwargs(t),
         )
 
         trainer = PPOTrainer(
@@ -125,7 +141,10 @@ class PPOTrainerWrapper(BaseTrainer):
             value_model=value_model,
         )
 
-        trainer.train()
+        if resume_from:
+            trainer.train(resume_from_checkpoint=str(resume_from))
+        else:
+            trainer.train()
 
         final_path = self.output_dir / "final"
         final_path.mkdir(parents=True, exist_ok=True)
@@ -137,6 +156,8 @@ class PPOTrainerWrapper(BaseTrainer):
             output_dir=self.output_dir,
             checkpoint_path=final_path,
             global_step=global_step,
+            model=policy,
+            tokenizer=tokenizer,
         )
         self.save_training_metadata(result)
         self.logger.complete("PPO training complete", steps=global_step)

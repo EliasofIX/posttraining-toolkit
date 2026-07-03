@@ -9,8 +9,15 @@ from trl import GRPOConfig, GRPOTrainer
 
 from ptk.data.hf_adapter import to_hf_dataset_dict
 from ptk.data.table import TableDict
+from ptk.training.base_trainer import (
+    BaseTrainer,
+    TrainerResult,
+    dataloader_kwargs,
+    dataset_map_kwargs,
+    place_model,
+    prepare_tokenizer,
+)
 from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
-from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokenizer
 
 
 def _reward_length(completions: list, **kwargs) -> list[float]:
@@ -39,20 +46,18 @@ class GRPOTrainerWrapper(BaseTrainer):
         self.logger.start("GRPO training", model=self.config.base_model)
 
         tokenizer = prepare_tokenizer(self.config.base_model)
-        device = torch_device_string(self.env.device)
         model = AutoModelForCausalLM.from_pretrained(self.config.base_model, trust_remote_code=True)
-        if device != "cpu":
-            model.to(device)
+        model = place_model(model, self.env)
 
         t = self.config.training
         precision = resolve_mixed_precision(self.env.device, self.config.compute.mixed_precision)
-        use_cpu = device == "cpu"
+        device = torch_device_string(self.env.device)
 
         def to_prompt(example):
             text = example.get("text", example.get("prompt", ""))
             return {"prompt": text[: rl.max_prompt_length]}
 
-        train_ds = hf_data["train"].map(to_prompt)
+        train_ds = hf_data["train"].map(to_prompt, **dataset_map_kwargs(t))
 
         grpo_config = GRPOConfig(
             output_dir=str(self.output_dir),
@@ -67,9 +72,11 @@ class GRPOTrainerWrapper(BaseTrainer):
             num_generations=rl.num_generations,
             max_completion_length=rl.max_completion_length,
             beta=rl.beta,
-            use_cpu=use_cpu,
+            use_cpu=device == "cpu",
             fp16=precision == "fp16",
             bf16=precision == "bf16",
+            gradient_checkpointing=t.gradient_checkpointing,
+            **dataloader_kwargs(t),
         )
 
         trainer = GRPOTrainer(
@@ -92,6 +99,8 @@ class GRPOTrainerWrapper(BaseTrainer):
             output_dir=self.output_dir,
             checkpoint_path=final_path,
             global_step=trainer.state.global_step,
+            model=trainer.model,
+            tokenizer=tokenizer,
         )
         self.save_training_metadata(result)
         self.logger.complete("GRPO training complete", step=result.global_step)

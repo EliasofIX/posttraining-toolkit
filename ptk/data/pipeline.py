@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+from pathlib import Path
 from typing import Any
 
 from ptk.config.schema import DataConfig, SyntheticFilters, TrainingMethod
@@ -119,3 +121,33 @@ def hash_dataset(dataset_dict: TableDict) -> str:
             row = ds[i]
             h.update(str(sorted(row.items())).encode())
     return h.hexdigest()[:16]
+
+
+def save_processed_cache(cache_dir: Path, dataset_dict: TableDict, content_hash: str, method: str) -> None:
+    """Persist preprocessed splits for resume/cache hits."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    for split_name, table in dataset_dict.items():
+        table.save_jsonl(cache_dir / split_name)
+    manifest = {"hash": content_hash, "method": method, "splits": list(dataset_dict.keys())}
+    (cache_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
+def load_processed_cache(cache_dir: Path, expected_hash: str | None = None) -> TableDict | None:
+    """Load cached preprocessed splits when hash matches."""
+    manifest_path = cache_dir / "manifest.json"
+    if not manifest_path.exists():
+        return None
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if expected_hash and manifest.get("hash") != expected_hash:
+        return None
+
+    splits = manifest.get("splits", ["train", "validation"])
+    dataset_dict = TableDict()
+    for split_name in splits:
+        split_dir = cache_dir / split_name
+        if not (split_dir / "data.jsonl").exists():
+            return None
+        dataset_dict[split_name] = Table.load_jsonl(split_dir)
+
+    return dataset_dict if dataset_dict else None

@@ -37,7 +37,7 @@ def export_run(
         elif fmt == ExportFormat.MERGED_FP16:
             artifacts["merged_fp16"] = _export_merged_fp16(config, ckpt, export_dir / "merged_fp16")
         elif fmt == ExportFormat.GGUF:
-            artifacts["gguf"] = _export_gguf(config, ckpt, export_dir / "model.gguf")
+            artifacts["gguf"] = _export_gguf(config, ckpt, export_dir / "model.gguf", export_dir)
         log.complete(f"Exported {fmt.value}", path=artifacts.get(fmt.value))
 
     if config.output.push_to_hub:
@@ -48,17 +48,38 @@ def export_run(
     return artifacts
 
 
+def _find_existing_merged(export_dir: Path) -> Path | None:
+    """Return an existing merged model directory if valid."""
+    for candidate in (export_dir / "merged_fp16", export_dir / "merged_for_gguf"):
+        if candidate.exists() and (candidate / "config.json").exists():
+            return candidate
+    return None
+
+
 def _export_adapter_only(checkpoint: Path, out_dir: Path) -> str:
     out_dir.mkdir(parents=True, exist_ok=True)
     if checkpoint.exists():
-        if (checkpoint / "adapter_config.json").exists() or list(checkpoint.glob("adapter_*")):
-            shutil.copytree(checkpoint, out_dir, dirs_exist_ok=True)
-        else:
-            shutil.copytree(checkpoint, out_dir, dirs_exist_ok=True)
+        shutil.copytree(checkpoint, out_dir, dirs_exist_ok=True)
     return str(out_dir)
 
 
-def _export_merged_fp16(config: PTKConfig, checkpoint: Path, out_dir: Path) -> str:
+def _export_merged_fp16(
+    config: PTKConfig,
+    checkpoint: Path,
+    out_dir: Path,
+    *,
+    export_dir: Path | None = None,
+    force_remerge: bool = False,
+) -> str:
+    if not force_remerge:
+        existing = _find_existing_merged(export_dir or out_dir.parent)
+        if existing is not None and existing.resolve() != out_dir.resolve():
+            out_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(existing, out_dir, dirs_exist_ok=True)
+            return str(out_dir)
+        if existing is not None and existing.resolve() == out_dir.resolve():
+            return str(out_dir)
+
     out_dir.mkdir(parents=True, exist_ok=True)
     adapter_config = checkpoint / "adapter_config.json"
 
@@ -73,7 +94,7 @@ def _export_merged_fp16(config: PTKConfig, checkpoint: Path, out_dir: Path) -> s
         merged.save_pretrained(str(out_dir))
         tokenizer = AutoTokenizer.from_pretrained(config.base_model, trust_remote_code=True)
         tokenizer.save_pretrained(str(out_dir))
-    elif checkpoint.exists():
+    elif checkpoint.exists() and (checkpoint / "config.json").exists():
         shutil.copytree(checkpoint, out_dir, dirs_exist_ok=True)
     else:
         model = AutoModelForCausalLM.from_pretrained(
@@ -88,10 +109,13 @@ def _export_merged_fp16(config: PTKConfig, checkpoint: Path, out_dir: Path) -> s
     return str(out_dir)
 
 
-def _export_gguf(config: PTKConfig, checkpoint: Path, out_path: Path) -> str:
+def _export_gguf(config: PTKConfig, checkpoint: Path, out_path: Path, export_dir: Path) -> str:
     """Export to GGUF using native converter or llama.cpp fallback."""
-    merged_dir = out_path.parent / "merged_for_gguf"
-    _export_merged_fp16(config, checkpoint, merged_dir)
+    merged_dir = export_dir / "merged_fp16"
+    if not (merged_dir.exists() and (merged_dir / "config.json").exists()):
+        merged_dir = export_dir / "merged_for_gguf"
+        if not (merged_dir.exists() and (merged_dir / "config.json").exists()):
+            _export_merged_fp16(config, checkpoint, merged_dir, export_dir=export_dir)
 
     try:
         from ptk.export.gguf_convert import convert_hf_to_gguf

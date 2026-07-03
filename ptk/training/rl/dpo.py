@@ -9,8 +9,13 @@ from trl import DPOConfig, DPOTrainer
 
 from ptk.data.hf_adapter import to_hf_dataset_dict
 from ptk.data.table import TableDict
-from ptk.distributed.detect import torch_device_string
-from ptk.training.base_trainer import BaseTrainer, TrainerResult, prepare_tokenizer
+from ptk.training.base_trainer import (
+    BaseTrainer,
+    TrainerResult,
+    dataloader_kwargs,
+    place_model,
+    prepare_tokenizer,
+)
 
 
 class DPOTrainerWrapper(BaseTrainer):
@@ -23,14 +28,8 @@ class DPOTrainerWrapper(BaseTrainer):
         self.logger.start("DPO training", model=self.config.base_model, beta=rl.beta)
 
         tokenizer = prepare_tokenizer(self.config.base_model)
-        device = torch_device_string(self.env.device)
         model = AutoModelForCausalLM.from_pretrained(self.config.base_model, trust_remote_code=True)
-        if device != "cpu":
-            model.to(device)
-
-        ref_model = AutoModelForCausalLM.from_pretrained(self.config.base_model, trust_remote_code=True)
-        if device != "cpu":
-            ref_model.to(device)
+        model = place_model(model, self.env)
 
         t = self.config.training
         dpo_config = DPOConfig(
@@ -45,11 +44,13 @@ class DPOTrainerWrapper(BaseTrainer):
             max_steps=t.max_iters if t.max_iters else -1,
             beta=rl.beta,
             max_length=t.max_seq_length,
+            gradient_checkpointing=t.gradient_checkpointing,
+            **dataloader_kwargs(t),
         )
 
         trainer = DPOTrainer(
             model=model,
-            ref_model=ref_model,
+            ref_model=None,
             args=dpo_config,
             train_dataset=hf_data["train"],
             eval_dataset=hf_data.get("validation"),
@@ -68,6 +69,8 @@ class DPOTrainerWrapper(BaseTrainer):
             output_dir=self.output_dir,
             checkpoint_path=final_path,
             global_step=trainer.state.global_step,
+            model=trainer.model,
+            tokenizer=tokenizer,
         )
         self.save_training_metadata(result)
         self.logger.complete("DPO training complete", step=result.global_step)

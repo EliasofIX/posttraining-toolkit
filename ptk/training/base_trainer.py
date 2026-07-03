@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,9 +11,9 @@ from typing import Any
 
 from transformers import PreTrainedTokenizerBase, TrainingArguments
 
-from ptk.config.schema import PTKConfig
+from ptk.config.schema import ComputeStrategy, PTKConfig, TrainingConfig
 from ptk.data.table import TableDict
-from ptk.distributed.detect import ComputeEnvironment, resolve_mixed_precision
+from ptk.distributed.detect import ComputeEnvironment, resolve_mixed_precision, torch_device_string
 from ptk.logging import Logger
 
 
@@ -24,6 +25,8 @@ class TrainerResult:
     metrics: dict[str, float] = field(default_factory=dict)
     checkpoint_path: Path | None = None
     global_step: int = 0
+    model: Any | None = field(default=None, repr=False)
+    tokenizer: PreTrainedTokenizerBase | None = field(default=None, repr=False)
 
 
 class BaseTrainer(ABC):
@@ -72,9 +75,42 @@ class BaseTrainer(ABC):
             "bf16": bf16,
             "max_steps": t.max_iters if t.max_iters else -1,
             "remove_unused_columns": False,
+            "gradient_checkpointing": t.gradient_checkpointing,
+            **dataloader_kwargs(t),
         }
         args.update(overrides)
         return TrainingArguments(**args)
+
+    def build_sft_config_kwargs(self, *, has_validation: bool = False) -> dict[str, Any]:
+        """Shared SFTConfig kwargs for SFT, LoRA, and QLoRA trainers."""
+        t = self.config.training
+        precision = resolve_mixed_precision(self.env.device, self.config.compute.mixed_precision)
+        device = torch_device_string(self.env.device)
+        return {
+            "output_dir": str(self.output_dir),
+            "num_train_epochs": t.epochs,
+            "per_device_train_batch_size": t.batch_size,
+            "per_device_eval_batch_size": t.batch_size,
+            "gradient_accumulation_steps": t.gradient_accumulation_steps,
+            "learning_rate": t.learning_rate,
+            "warmup_ratio": t.warmup_ratio,
+            "weight_decay": t.weight_decay,
+            "logging_steps": t.logging_steps,
+            "save_steps": t.save_steps,
+            "eval_strategy": "steps" if has_validation else "no",
+            "eval_steps": t.save_steps,
+            "save_total_limit": 3,
+            "load_best_model_at_end": False,
+            "report_to": "none",
+            "max_steps": t.max_iters if t.max_iters else -1,
+            "max_length": t.max_seq_length,
+            "dataset_text_field": "text",
+            "use_cpu": device == "cpu",
+            "fp16": precision == "fp16",
+            "bf16": precision == "bf16",
+            "gradient_checkpointing": t.gradient_checkpointing,
+            **dataloader_kwargs(t),
+        }
 
     def save_training_metadata(self, result: TrainerResult) -> None:
         """Persist training metadata for registry."""
@@ -86,6 +122,44 @@ class BaseTrainer(ABC):
             "checkpoint": str(result.checkpoint_path) if result.checkpoint_path else None,
         }
         meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+
+def is_distributed(env: ComputeEnvironment) -> bool:
+    """Return True when running under accelerate/torchrun."""
+    if env.world_size > 1:
+        return True
+    if os.environ.get("LOCAL_RANK") is not None:
+        return True
+    if os.environ.get("PTK_DISTRIBUTED_ACTIVE") == "1":
+        return True
+    return env.strategy in (ComputeStrategy.MULTI_GPU, ComputeStrategy.MULTI_NODE) and env.num_gpus > 1
+
+
+def place_model(model: Any, env: ComputeEnvironment) -> Any:
+    """Move model to device only for single-process runs."""
+    if is_distributed(env):
+        return model
+    device = torch_device_string(env.device)
+    if device != "cpu":
+        model.to(device)
+    return model
+
+
+def dataloader_kwargs(training: TrainingConfig) -> dict[str, Any]:
+    """Map training config dataloader fields to TRL/HF kwargs."""
+    kwargs: dict[str, Any] = {}
+    if training.dataloader_num_workers is not None:
+        kwargs["dataloader_num_workers"] = training.dataloader_num_workers
+    if training.dataloader_pin_memory is not None:
+        kwargs["dataloader_pin_memory"] = training.dataloader_pin_memory
+    return kwargs
+
+
+def dataset_map_kwargs(training: TrainingConfig) -> dict[str, Any]:
+    """Kwargs for HuggingFace Dataset.map multiprocessing."""
+    if training.dataset_num_proc is None:
+        return {}
+    return {"num_proc": training.dataset_num_proc}
 
 
 def get_trainer(config: PTKConfig, env: ComputeEnvironment, logger: Logger) -> BaseTrainer:

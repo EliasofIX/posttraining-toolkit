@@ -39,8 +39,19 @@ def load_raw_dataset(config: DatasetConfig) -> Table:
 
 
 def _load_jsonl(path: Path) -> Table:
-    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    return Table.from_records(rows)
+    columns: list[str] = []
+    data: dict[str, list] = {}
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not columns:
+                columns = list(row.keys())
+                data = {col: [] for col in columns}
+            for col in columns:
+                data[col].append(row.get(col))
+    return Table(columns, data)
 
 
 def _load_csv(path: Path) -> Table:
@@ -103,6 +114,39 @@ def _load_hf_hub(repo_id: str) -> Table:
         f" Tried: {', '.join(_HF_HUB_CANDIDATES)}.",
         field_path="data.dataset.path",
     )
+
+
+def count_dataset_samples(config: DatasetConfig) -> int:
+    """Fast row count without loading full dataset into memory."""
+    if config.format == DatasetFormat.HF_HUB:
+        return 0
+
+    path = Path(config.path)
+    if not path.exists():
+        return 0
+
+    if config.format == DatasetFormat.JSONL:
+        count = 0
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    count += 1
+        return count
+
+    if config.format == DatasetFormat.PARQUET:
+        try:
+            import pyarrow.parquet as pq
+        except ImportError:
+            return 0
+        return pq.read_metadata(path).num_rows
+
+    if config.format == DatasetFormat.CSV:
+        with path.open(encoding="utf-8", newline="") as handle:
+            reader = csv.reader(handle)
+            next(reader, None)
+            return sum(1 for _ in reader)
+
+    return 0
 
 
 def normalize_sft_columns(dataset: Table, config: DatasetConfig) -> Table:
