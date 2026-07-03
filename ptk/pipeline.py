@@ -99,6 +99,12 @@ def _launch_distributed(
     skip_export: bool,
 ) -> str:
     """Spawn accelerate launch for multi-GPU training."""
+    registry = RunRegistry()
+    if run_id:
+        registry.validate_resume(run_id, config)
+    else:
+        run_id = registry.create_run(config).run_id
+
     env = detect_environment(
         device=config.compute.device,
         strategy=config.compute.strategy,
@@ -144,9 +150,10 @@ def _launch_distributed(
     logger.start("Launching distributed training", command=" ".join(cmd))
     result = subprocess.run(cmd, env=child_env, check=False)
     if result.returncode != 0:
+        registry.update_run(run_id, status=RunStatus.FAILED, error=f"exit code {result.returncode}")
         raise RuntimeError(f"Distributed launch failed with exit code {result.returncode}")
 
-    return run_id or child_env.get("PTK_RUN_ID", "distributed-run")
+    return run_id
 
 
 def run_pipeline(

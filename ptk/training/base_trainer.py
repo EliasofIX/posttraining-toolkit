@@ -11,7 +11,7 @@ from typing import Any
 
 from transformers import PreTrainedTokenizerBase, TrainingArguments
 
-from ptk.config.schema import ComputeStrategy, PTKConfig, TrainingConfig
+from ptk.config.schema import PTKConfig, TrainingConfig
 from ptk.data.table import TableDict
 from ptk.distributed.detect import ComputeEnvironment, resolve_mixed_precision, torch_device_string
 from ptk.logging import Logger
@@ -126,13 +126,11 @@ class BaseTrainer(ABC):
 
 def is_distributed(env: ComputeEnvironment) -> bool:
     """Return True when running under accelerate/torchrun."""
-    if env.world_size > 1:
-        return True
     if os.environ.get("LOCAL_RANK") is not None:
         return True
     if os.environ.get("PTK_DISTRIBUTED_ACTIVE") == "1":
         return True
-    return env.strategy in (ComputeStrategy.MULTI_GPU, ComputeStrategy.MULTI_NODE) and env.num_gpus > 1
+    return int(os.environ.get("WORLD_SIZE", "1")) > 1
 
 
 def place_model(model: Any, env: ComputeEnvironment) -> Any:
