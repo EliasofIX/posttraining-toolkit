@@ -33,6 +33,7 @@ def load_file(path: str | Path) -> dict[str, torch.Tensor]:
     header = json.loads(data[8:header_end].decode("utf-8"))
 
     tensors: dict[str, torch.Tensor] = {}
+    data_view = memoryview(data)
     data_start = header_end
     for name, info in header.items():
         if name == "__metadata__":
@@ -46,7 +47,8 @@ def load_file(path: str | Path) -> dict[str, torch.Tensor]:
         if torch_dtype is None:
             raise ValueError(f"Unsupported safetensors dtype: {dtype_str}")
 
-        tensor = torch.frombuffer(bytearray(data[start:end]), dtype=torch_dtype)
-        tensors[name] = tensor.reshape(shape).clone()
+        chunk = data_view[start:end]
+        tensor = torch.frombuffer(bytearray(chunk), dtype=torch_dtype)
+        tensors[name] = tensor.reshape(shape)
 
     return tensors

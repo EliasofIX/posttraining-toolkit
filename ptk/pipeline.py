@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
-from ptk.config.schema import DataSource, PTKConfig
+from ptk.config.loader import config_to_yaml
+from ptk.config.schema import ComputeStrategy, DataSource, PTKConfig
 from ptk.data.generation import generate_synthetic_data
-from ptk.data.pipeline import dataset_stats, hash_dataset, preprocess_dataset
-from ptk.data.table import Table, TableDict
+from ptk.data.pipeline import (
+    dataset_stats,
+    hash_dataset,
+    load_processed_cache,
+    preprocess_dataset,
+    save_processed_cache,
+)
+from ptk.data.table import TableDict
+from ptk.distributed.accelerate_gen import generate_accelerate_config
 from ptk.distributed.detect import detect_environment
 from ptk.eval.harness import EvalHarness
 from ptk.export.formats import export_run
@@ -31,10 +43,9 @@ def plan_run(config: PTKConfig) -> dict[str, Any]:
         n_samples = config.data.synthetic.n_samples
     elif config.data.dataset:
         try:
-            from ptk.data.loaders import load_raw_dataset
+            from ptk.data.loaders import count_dataset_samples
 
-            ds = load_raw_dataset(config.data.dataset)
-            n_samples = len(ds)
+            n_samples = count_dataset_samples(config.data.dataset)
         except Exception:
             n_samples = 0
 
@@ -61,6 +72,90 @@ def plan_run(config: PTKConfig) -> dict[str, Any]:
     }
 
 
+def _is_distributed_active() -> bool:
+    return (
+        os.environ.get("PTK_DISTRIBUTED_ACTIVE") == "1"
+        or os.environ.get("LOCAL_RANK") is not None
+        or int(os.environ.get("WORLD_SIZE", "1")) > 1
+    )
+
+
+def _should_launch_distributed(env) -> bool:
+    return (
+        env.strategy in (ComputeStrategy.MULTI_GPU, ComputeStrategy.MULTI_NODE)
+        and env.num_gpus > 1
+        and not _is_distributed_active()
+        and shutil.which("accelerate") is not None
+    )
+
+
+def _launch_distributed(
+    config: PTKConfig,
+    logger: Logger,
+    *,
+    run_id: str | None,
+    resume_from: Path | None,
+    skip_eval: bool,
+    skip_export: bool,
+) -> str:
+    """Spawn accelerate launch for multi-GPU training."""
+    registry = RunRegistry()
+    if run_id:
+        registry.validate_resume(run_id, config)
+    else:
+        run_id = registry.create_run(config).run_id
+
+    env = detect_environment(
+        device=config.compute.device,
+        strategy=config.compute.strategy,
+        nodes=config.compute.nodes,
+        gpus_per_node=config.compute.gpus_per_node,
+    )
+    output_dir = config.output_path()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if config.compute.accelerate_config:
+        accel_cfg = Path(config.compute.accelerate_config)
+    else:
+        accel_cfg = output_dir / "accelerate_config.yaml"
+        generate_accelerate_config(env, accel_cfg)
+
+    config_path = output_dir / "pipeline_config.yaml"
+    config_path.write_text(config_to_yaml(config), encoding="utf-8")
+
+    cmd = [
+        "accelerate",
+        "launch",
+        "--config_file",
+        str(accel_cfg),
+        "-m",
+        "ptk.cli",
+        "run",
+        str(config_path),
+    ]
+    if skip_eval:
+        cmd.append("--skip-eval")
+    if skip_export:
+        cmd.append("--skip-export")
+    if logger.machine:
+        cmd.append("--machine")
+
+    child_env = os.environ.copy()
+    child_env["PTK_DISTRIBUTED_ACTIVE"] = "1"
+    if run_id:
+        child_env["PTK_RUN_ID"] = run_id
+    if resume_from:
+        child_env["PTK_RESUME_FROM"] = str(resume_from)
+
+    logger.start("Launching distributed training", command=" ".join(cmd))
+    result = subprocess.run(cmd, env=child_env, check=False)
+    if result.returncode != 0:
+        registry.update_run(run_id, status=RunStatus.FAILED, error=f"exit code {result.returncode}")
+        raise RuntimeError(f"Distributed launch failed with exit code {result.returncode}")
+
+    return run_id
+
+
 def run_pipeline(
     config: PTKConfig,
     logger: Logger,
@@ -77,12 +172,10 @@ def run_pipeline(
         logger.complete("Dry run complete", **plan)
         return run_id or "dry-run"
 
-    registry = RunRegistry()
-    if run_id:
-        record = registry.validate_resume(run_id, config)
-    else:
-        record = registry.create_run(config)
-        run_id = record.run_id
+    run_id = run_id or os.environ.get("PTK_RUN_ID")
+    resume_from = resume_from or (
+        Path(os.environ["PTK_RESUME_FROM"]) if os.environ.get("PTK_RESUME_FROM") else None
+    )
 
     env = detect_environment(
         device=config.compute.device,
@@ -91,24 +184,50 @@ def run_pipeline(
         gpus_per_node=config.compute.gpus_per_node,
     )
 
-    try:
-        dataset_dict = _prepare_data(config, logger, registry, run_id)
+    if _should_launch_distributed(env):
+        return _launch_distributed(
+            config,
+            logger,
+            run_id=run_id,
+            resume_from=resume_from,
+            skip_eval=skip_eval,
+            skip_export=skip_export,
+        )
 
-        registry.update_run(run_id, status=RunStatus.TRAINING, data_hash=hash_dataset(dataset_dict))
+    registry = RunRegistry()
+    if run_id:
+        record = registry.validate_resume(run_id, config)
+    else:
+        record = registry.create_run(config)
+        run_id = record.run_id
+
+    try:
+        existing_hash = record.data_hash if run_id and record else None
+        dataset_dict = _prepare_data(config, logger, existing_data_hash=existing_hash)
+
+        content_hash = hash_dataset(dataset_dict)
+        registry.update_run(run_id, status=RunStatus.TRAINING, data_hash=content_hash)
         trainer = get_trainer(config, env, logger)
         result = trainer.train(dataset_dict, resume_from=resume_from)
 
         registry.update_run(
             run_id,
-            status=RunStatus.EVAL if not skip_eval else RunStatus.EXPORT,
+            status=RunStatus.EVAL if not skip_eval and config.eval.benchmarks else RunStatus.EXPORT,
             checkpoint_path=str(result.checkpoint_path) if result.checkpoint_path else None,
             global_step=result.global_step,
             metrics=result.metrics,
         )
 
-        if not skip_eval and (config.eval.benchmarks or True):
+        if not skip_eval and config.eval.benchmarks:
             harness = EvalHarness(logger)
-            harness.run(config, checkpoint_path=result.checkpoint_path)
+            if result.model is not None and result.tokenizer is not None:
+                eval_results = harness.run_with_model(config, result.model, result.tokenizer)
+                _save_eval_results(config, eval_results)
+                result.model = None
+                result.tokenizer = None
+            else:
+                eval_results = harness.run(config, checkpoint_path=result.checkpoint_path)
+                _save_eval_results(config, eval_results)
 
         registry.update_run(run_id, status=RunStatus.EXPORT)
 
@@ -124,20 +243,40 @@ def run_pipeline(
         raise
 
 
-def _prepare_data(config: PTKConfig, logger: Logger, registry: RunRegistry, run_id: str) -> TableDict:
-    registry.update_run(run_id, status=RunStatus.DATA_GEN)
-    data_cache = config.output_path() / "data_cache"
+def _save_eval_results(config: PTKConfig, results: dict[str, Any]) -> None:
+    out_path = config.output_path() / "eval_results.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
+
+
+def _prepare_data(
+    config: PTKConfig,
+    logger: Logger,
+    *,
+    existing_data_hash: str | None = None,
+) -> TableDict:
+    cache_dir = config.output_path() / "data_cache" / "processed"
+
+    if existing_data_hash:
+        cached = load_processed_cache(cache_dir, expected_hash=existing_data_hash)
+        if cached is not None:
+            stats = dataset_stats(cached)
+            logger.complete("Loaded cached dataset", **stats, hash=existing_data_hash)
+            return cached
 
     if config.data.source == DataSource.SYNTHETIC:
         raw = generate_synthetic_data(config, logger)
-        data_cache.mkdir(parents=True, exist_ok=True)
-        raw.save_jsonl(data_cache / "raw")
-        loaded = Table.load_jsonl(data_cache / "raw")
-        split = loaded.train_test_split(test_size=0.1, seed=config.data.seed)
-        return TableDict({"train": split["train"], "validation": split["test"]})
+        split = raw.train_test_split(test_size=0.1, seed=config.data.seed)
+        dataset_dict = TableDict({"train": split["train"], "validation": split["test"]})
+        content_hash = hash_dataset(dataset_dict)
+        save_processed_cache(cache_dir, dataset_dict, content_hash, config.method.value)
+        return dataset_dict
 
     logger.start("Loading dataset")
     dataset_dict = preprocess_dataset(config.data, config.method)
     stats = dataset_stats(dataset_dict)
     logger.complete("Dataset ready", **stats)
+
+    content_hash = hash_dataset(dataset_dict)
+    save_processed_cache(cache_dir, dataset_dict, content_hash, config.method.value)
     return dataset_dict

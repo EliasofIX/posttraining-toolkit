@@ -148,6 +148,10 @@ class TrainingConfig(BaseModel):
     max_seq_length: int = Field(default=512, ge=1)
     logging_steps: int = Field(default=10, ge=1)
     save_steps: int = Field(default=100, ge=1)
+    dataloader_num_workers: int | None = Field(default=None, ge=0)
+    dataloader_pin_memory: bool | None = None
+    dataset_num_proc: int | None = Field(default=None, ge=1)
+    gradient_checkpointing: bool = False
     lora: LoRAConfig | None = None
     quantization: QuantizationConfig | None = None
     rl: RLConfig | None = None

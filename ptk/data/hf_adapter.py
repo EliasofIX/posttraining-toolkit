@@ -9,9 +9,9 @@ def to_hf_dataset(table: Table):
     """Convert a Table to a HuggingFace Dataset for TRL trainers."""
     from datasets import Dataset
 
-    if not table.column_names:
+    data = table.to_dict()
+    if not data:
         return Dataset.from_dict({})
-    data = {col: [row.get(col) for row in table] for col in table.column_names}
     return Dataset.from_dict(data)
 
 
