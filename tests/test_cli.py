@@ -71,6 +71,19 @@ def test_cli_init(tmp_path):
     assert code == 0
     assert out.exists()
 
+    code, output = invoke(["validate", str(out), "--json"])
+    assert code == 0
+    assert '"valid": true' in output
+
+
+def test_cli_init_all_methods_validate(tmp_path):
+    for method in ("sft", "lora", "qlora", "dpo", "ppo", "grpo"):
+        out = tmp_path / f"{method}.yaml"
+        code, _ = invoke(["init", "--method", method, "--output", str(out)])
+        assert code == 0
+        code, output = invoke(["validate", str(out), "--json"])
+        assert code == 0, f"{method} scaffold failed validation: {output}"
+
 
 def test_cli_list():
     code, output = invoke(["list", "--json"])

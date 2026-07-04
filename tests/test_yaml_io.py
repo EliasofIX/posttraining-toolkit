@@ -20,6 +20,12 @@ def test_load_fixture_configs():
         assert config.run_name
 
 
+def test_yaml_empty_list_round_trip():
+    dumped = dump_yaml({"benchmarks": [], "nested": {"items": []}})
+    reloaded = load_yaml(dumped)
+    assert reloaded == {"benchmarks": [], "nested": {"items": []}}
+
+
 def test_yaml_round_trip():
     original = load_yaml((FIXTURES / "sft.yaml").read_text(encoding="utf-8"))
     dumped = dump_yaml(original)

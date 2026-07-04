@@ -1,0 +1,36 @@
+run_name: test-qlora
+base_model: distilgpt2
+method: qlora
+
+data:
+  source: dataset
+  dataset:
+    path: tests/fixtures/data/train.jsonl
+    format: jsonl
+    text_column: text
+
+training:
+  epochs: 1
+  max_iters: 2
+  learning_rate: 2.0e-4
+  batch_size: 1
+  max_seq_length: 64
+  logging_steps: 1
+  save_steps: 2
+  lora:
+    r: 8
+    alpha: 16
+    dropout: 0.05
+  quantization:
+    bits: 4
+    backend: auto
+
+compute:
+  device: cpu
+  strategy: single_gpu
+  mixed_precision: fp32
+
+output:
+  dir: ./test_outputs
+  export:
+    - adapter_only

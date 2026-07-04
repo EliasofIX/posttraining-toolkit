@@ -112,6 +112,32 @@ class BaseTrainer(ABC):
             **dataloader_kwargs(t),
         }
 
+    def build_dpo_config_kwargs(self, *, has_validation: bool = False) -> dict[str, Any]:
+        """Shared DPOConfig kwargs for DPO trainer."""
+        t = self.config.training
+        assert self.config.training.rl is not None
+        rl = self.config.training.rl
+        precision = resolve_mixed_precision(self.env.device, self.config.compute.mixed_precision)
+        device = torch_device_string(self.env.device)
+        return {
+            "output_dir": str(self.output_dir),
+            "num_train_epochs": t.epochs,
+            "per_device_train_batch_size": t.batch_size,
+            "gradient_accumulation_steps": t.gradient_accumulation_steps,
+            "learning_rate": t.learning_rate,
+            "logging_steps": t.logging_steps,
+            "save_steps": t.save_steps,
+            "report_to": "none",
+            "max_steps": t.max_iters if t.max_iters else -1,
+            "beta": rl.beta,
+            "max_length": t.max_seq_length,
+            "gradient_checkpointing": t.gradient_checkpointing,
+            "use_cpu": device == "cpu",
+            "fp16": precision == "fp16",
+            "bf16": precision == "bf16",
+            **dataloader_kwargs(t),
+        }
+
     def save_training_metadata(self, result: TrainerResult) -> None:
         """Persist training metadata for registry."""
         meta_path = self.config.output_path() / "training_meta.json"
