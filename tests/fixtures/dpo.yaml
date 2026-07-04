@@ -1,0 +1,34 @@
+run_name: test-dpo
+base_model: distilgpt2
+method: dpo
+
+data:
+  source: dataset
+  dataset:
+    path: tests/fixtures/data/preferences.jsonl
+    format: jsonl
+    prompt_column: prompt
+    chosen_column: chosen
+    rejected_column: rejected
+
+training:
+  epochs: 1
+  max_iters: 2
+  learning_rate: 5.0e-7
+  batch_size: 1
+  max_seq_length: 64
+  logging_steps: 1
+  save_steps: 2
+  rl:
+    beta: 0.1
+    kl_coef: 0.05
+
+compute:
+  device: cpu
+  strategy: single_gpu
+  mixed_precision: fp32
+
+output:
+  dir: ./test_outputs
+  export:
+    - adapter_only

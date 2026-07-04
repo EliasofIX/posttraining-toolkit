@@ -53,6 +53,24 @@ def test_grpo_e2e_cpu(tmp_path):
 
 
 @pytest.mark.slow
+def test_lora_e2e_cpu(tmp_path):
+    """LoRA pipeline smoke test on distilgpt2."""
+    _run_e2e("lora.yaml", tmp_path, min_steps=2)
+
+
+@pytest.mark.slow
+def test_qlora_e2e_cpu(tmp_path):
+    """QLoRA pipeline smoke test on distilgpt2 (CPU fp16 fallback)."""
+    _run_e2e("qlora.yaml", tmp_path, min_steps=2)
+
+
+@pytest.mark.slow
+def test_dpo_e2e_cpu(tmp_path):
+    """DPO pipeline smoke test on distilgpt2."""
+    _run_e2e("dpo.yaml", tmp_path, min_steps=2)
+
+
+@pytest.mark.slow
 def test_gguf_export_e2e(tmp_path):
     """Train SFT then export to GGUF."""
     config = load_config(FIXTURES / "sft.yaml")

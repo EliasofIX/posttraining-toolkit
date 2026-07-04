@@ -12,7 +12,6 @@ from ptk.data.table import TableDict
 from ptk.training.base_trainer import (
     BaseTrainer,
     TrainerResult,
-    dataloader_kwargs,
     place_model,
     prepare_tokenizer,
 )
@@ -31,21 +30,8 @@ class DPOTrainerWrapper(BaseTrainer):
         model = AutoModelForCausalLM.from_pretrained(self.config.base_model, trust_remote_code=True)
         model = place_model(model, self.env)
 
-        t = self.config.training
         dpo_config = DPOConfig(
-            output_dir=str(self.output_dir),
-            num_train_epochs=t.epochs,
-            per_device_train_batch_size=t.batch_size,
-            gradient_accumulation_steps=t.gradient_accumulation_steps,
-            learning_rate=t.learning_rate,
-            logging_steps=t.logging_steps,
-            save_steps=t.save_steps,
-            report_to="none",
-            max_steps=t.max_iters if t.max_iters else -1,
-            beta=rl.beta,
-            max_length=t.max_seq_length,
-            gradient_checkpointing=t.gradient_checkpointing,
-            **dataloader_kwargs(t),
+            **self.build_dpo_config_kwargs(has_validation="validation" in hf_data),
         )
 
         trainer = DPOTrainer(

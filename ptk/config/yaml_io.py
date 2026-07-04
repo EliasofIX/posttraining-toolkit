@@ -51,7 +51,10 @@ def _parse_block(lines: list[str], start: int, indent: int) -> tuple[Any, int]:
         rest = rest.strip()
 
         if rest:
-            mapping[key] = _parse_scalar(rest)
+            if rest == "[]":
+                mapping[key] = []
+            else:
+                mapping[key] = _parse_scalar(rest)
             i += 1
             continue
 
@@ -151,7 +154,9 @@ def _emit(obj: Any, indent: int) -> list[str]:
     if isinstance(obj, dict):
         lines: list[str] = []
         for key, value in obj.items():
-            if isinstance(value, (dict, list)):
+            if isinstance(value, list) and not value:
+                lines.append(f"{prefix}{key}: []")
+            elif isinstance(value, (dict, list)):
                 lines.append(f"{prefix}{key}:")
                 lines.extend(_emit(value, indent + 1))
             elif value is None:
@@ -168,6 +173,8 @@ def _emit(obj: Any, indent: int) -> list[str]:
         return lines
 
     if isinstance(obj, list):
+        if not obj:
+            return [f"{prefix}[]"]
         lines = []
         for item in obj:
             if isinstance(item, (dict, list)):
