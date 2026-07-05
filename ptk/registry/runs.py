@@ -108,10 +108,24 @@ class RunRegistry:
 
     def find_latest_checkpoint(self, run_id: str) -> Path | None:
         record = self.get_run(run_id)
-        if record is None or not record.checkpoint_path:
+        if record is None:
             return None
-        path = Path(record.checkpoint_path)
-        return path if path.exists() else None
+
+        config = PTKConfig.model_validate(record.config)
+        checkpoint_root = config.output_path() / "checkpoints"
+        if checkpoint_root.exists():
+            numbered = sorted(
+                checkpoint_root.glob("checkpoint-*"),
+                key=lambda path: int(path.name.rsplit("-", maxsplit=1)[-1]),
+            )
+            if numbered:
+                return numbered[-1]
+
+        if record.checkpoint_path:
+            path = Path(record.checkpoint_path)
+            if path.exists():
+                return path
+        return None
 
     def validate_resume(self, run_id: str, config: PTKConfig) -> RunRecord:
         """Ensure resume config matches original run."""

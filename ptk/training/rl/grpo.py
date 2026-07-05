@@ -14,8 +14,10 @@ from ptk.training.base_trainer import (
     TrainerResult,
     dataloader_kwargs,
     dataset_map_kwargs,
+    deepspeed_kwargs,
     place_model,
     prepare_tokenizer,
+    resolve_resume_checkpoint,
 )
 from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
 
@@ -77,6 +79,7 @@ class GRPOTrainerWrapper(BaseTrainer):
             bf16=precision == "bf16",
             gradient_checkpointing=t.gradient_checkpointing,
             **dataloader_kwargs(t),
+            **deepspeed_kwargs(self.config),
         )
 
         trainer = GRPOTrainer(
@@ -87,8 +90,9 @@ class GRPOTrainerWrapper(BaseTrainer):
             reward_funcs=_reward_length,
         )
 
-        if resume_from:
-            trainer.train(resume_from_checkpoint=str(resume_from))
+        checkpoint = resolve_resume_checkpoint(self.output_dir, resume_from)
+        if checkpoint:
+            trainer.train(resume_from_checkpoint=checkpoint)
         else:
             trainer.train()
 

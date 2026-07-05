@@ -11,7 +11,7 @@ from trl import SFTTrainer as TRLSFTTrainer
 
 from ptk.data.hf_adapter import to_hf_dataset_dict
 from ptk.data.table import TableDict
-from ptk.training.base_trainer import BaseTrainer, TrainerResult, place_model, prepare_tokenizer
+from ptk.training.base_trainer import BaseTrainer, TrainerResult, place_model, prepare_tokenizer, resolve_resume_checkpoint
 
 
 class LoRATrainer(BaseTrainer):
@@ -54,8 +54,9 @@ class LoRATrainer(BaseTrainer):
             processing_class=tokenizer,
         )
 
-        if resume_from:
-            trainer.train(resume_from_checkpoint=str(resume_from))
+        checkpoint = resolve_resume_checkpoint(self.output_dir, resume_from)
+        if checkpoint:
+            trainer.train(resume_from_checkpoint=checkpoint)
         else:
             trainer.train()
 

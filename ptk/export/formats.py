@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from typing import Any
 
 import torch
 from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
 from ptk.config.schema import ExportFormat, PTKConfig
 from ptk.logging import Logger
@@ -20,6 +21,8 @@ def export_run(
     formats: list[ExportFormat] | None = None,
     checkpoint_path: Path | None = None,
     logger: Logger | None = None,
+    model: PreTrainedModel | None = None,
+    tokenizer: PreTrainedTokenizerBase | None = None,
 ) -> dict[str, str]:
     """Export trained model to requested formats."""
     log = logger or Logger()
@@ -35,7 +38,14 @@ def export_run(
         if fmt == ExportFormat.ADAPTER_ONLY:
             artifacts["adapter_only"] = _export_adapter_only(ckpt, export_dir / "adapter")
         elif fmt == ExportFormat.MERGED_FP16:
-            artifacts["merged_fp16"] = _export_merged_fp16(config, ckpt, export_dir / "merged_fp16")
+            artifacts["merged_fp16"] = _export_merged_fp16(
+                config,
+                ckpt,
+                export_dir / "merged_fp16",
+                export_dir=export_dir,
+                model=model,
+                tokenizer=tokenizer,
+            )
         elif fmt == ExportFormat.GGUF:
             artifacts["gguf"] = _export_gguf(config, ckpt, export_dir / "model.gguf", export_dir)
         log.complete(f"Exported {fmt.value}", path=artifacts.get(fmt.value))
@@ -70,6 +80,8 @@ def _export_merged_fp16(
     *,
     export_dir: Path | None = None,
     force_remerge: bool = False,
+    model: PreTrainedModel | None = None,
+    tokenizer: PreTrainedTokenizerBase | None = None,
 ) -> str:
     if not force_remerge:
         existing = _find_existing_merged(export_dir or out_dir.parent)
@@ -83,28 +95,37 @@ def _export_merged_fp16(
     out_dir.mkdir(parents=True, exist_ok=True)
     adapter_config = checkpoint / "adapter_config.json"
 
+    if model is not None and adapter_config.exists() and hasattr(model, "merge_and_unload"):
+        merged = model.merge_and_unload()
+        merged.save_pretrained(str(out_dir))
+        tok = tokenizer or AutoTokenizer.from_pretrained(config.base_model, trust_remote_code=True)
+        tok.save_pretrained(str(out_dir))
+        return str(out_dir)
+
     if adapter_config.exists():
         base = AutoModelForCausalLM.from_pretrained(
             config.base_model,
             torch_dtype=torch.float16,
             trust_remote_code=True,
+            low_cpu_mem_usage=True,
         )
-        model = PeftModel.from_pretrained(base, str(checkpoint))
-        merged = model.merge_and_unload()
+        peft_model = PeftModel.from_pretrained(base, str(checkpoint))
+        merged = peft_model.merge_and_unload()
         merged.save_pretrained(str(out_dir))
-        tokenizer = AutoTokenizer.from_pretrained(config.base_model, trust_remote_code=True)
-        tokenizer.save_pretrained(str(out_dir))
+        tok = AutoTokenizer.from_pretrained(config.base_model, trust_remote_code=True)
+        tok.save_pretrained(str(out_dir))
     elif checkpoint.exists() and (checkpoint / "config.json").exists():
         shutil.copytree(checkpoint, out_dir, dirs_exist_ok=True)
     else:
-        model = AutoModelForCausalLM.from_pretrained(
+        fallback = AutoModelForCausalLM.from_pretrained(
             config.base_model,
             torch_dtype=torch.float16,
             trust_remote_code=True,
+            low_cpu_mem_usage=True,
         )
-        model.save_pretrained(str(out_dir))
-        tokenizer = AutoTokenizer.from_pretrained(config.base_model, trust_remote_code=True)
-        tokenizer.save_pretrained(str(out_dir))
+        fallback.save_pretrained(str(out_dir))
+        tok = AutoTokenizer.from_pretrained(config.base_model, trust_remote_code=True)
+        tok.save_pretrained(str(out_dir))
 
     return str(out_dir)
 

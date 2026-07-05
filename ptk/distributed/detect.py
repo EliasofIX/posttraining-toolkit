@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -176,6 +177,54 @@ def resolve_mixed_precision(device: DeviceType, requested: str) -> str:
     if device == DeviceType.MPS:
         return "fp16"
     return "fp32"
+
+
+def is_main_process() -> bool:
+    """Return True on rank 0 in distributed runs."""
+    local_rank = os.environ.get("LOCAL_RANK")
+    if local_rank is not None:
+        return int(local_rank) == 0
+    return int(os.environ.get("RANK", "0")) == 0
+
+
+def is_distributed_run() -> bool:
+    """Return True when running under torchrun/accelerate."""
+    if os.environ.get("LOCAL_RANK") is not None:
+        return True
+    if os.environ.get("PTK_DISTRIBUTED_ACTIVE") == "1":
+        return True
+    return int(os.environ.get("WORLD_SIZE", "1")) > 1
+
+
+def distributed_barrier() -> None:
+    """Synchronize all distributed ranks when torch.distributed is active."""
+    if not is_distributed_run():
+        return
+    try:
+        import torch.distributed as dist
+
+        if dist.is_available() and dist.is_initialized():
+            dist.barrier()
+    except Exception:
+        pass
+
+
+def wait_for_cache_manifest(cache_dir: Path, *, timeout_seconds: float = 600.0) -> None:
+    """Block until rank 0 writes processed cache manifest."""
+    import time
+
+    timeout_seconds = float(os.environ.get("PTK_CACHE_WAIT_SECONDS", timeout_seconds))
+    manifest = cache_dir / "manifest.json"
+    if manifest.exists():
+        return
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if manifest.exists():
+            return
+        time.sleep(0.5)
+
+    raise TimeoutError(f"Timed out waiting for processed cache manifest: {manifest}")
 
 
 def nvidia_smi_info() -> dict[str, Any] | None:

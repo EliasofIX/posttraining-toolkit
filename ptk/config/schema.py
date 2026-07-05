@@ -95,6 +95,7 @@ class DatasetConfig(BaseModel):
     response_column: str | None = None
     chosen_column: str | None = None
     rejected_column: str | None = None
+    streaming: bool = False
 
 
 class DataConfig(BaseModel):
@@ -135,6 +136,8 @@ class RLConfig(BaseModel):
     num_generations: int = Field(default=4, ge=1)
     max_prompt_length: int = Field(default=512, ge=1)
     max_completion_length: int = Field(default=256, ge=1)
+    ref_model_quantization: Literal["none", "4bit"] = "none"
+    precompute_ref_log_probs: bool = False
 
 
 class TrainingConfig(BaseModel):
@@ -148,9 +151,13 @@ class TrainingConfig(BaseModel):
     max_seq_length: int = Field(default=512, ge=1)
     logging_steps: int = Field(default=10, ge=1)
     save_steps: int = Field(default=100, ge=1)
+    save_strategy: Literal["steps", "epoch", "no"] = "steps"
     dataloader_num_workers: int | None = Field(default=None, ge=0)
     dataloader_pin_memory: bool | None = None
+    dataloader_prefetch_factor: int | None = Field(default=None, ge=1)
+    dataloader_persistent_workers: bool | None = None
     dataset_num_proc: int | None = Field(default=None, ge=1)
+    pretokenize_dataset: bool = False
     gradient_checkpointing: bool = False
     lora: LoRAConfig | None = None
     quantization: QuantizationConfig | None = None

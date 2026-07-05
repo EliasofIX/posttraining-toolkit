@@ -46,7 +46,8 @@ def test_synthetic_data_no_round_trip(tmp_path):
 
     data_cache = config.output_path() / "data_cache"
     assert not (data_cache / "raw").exists()
-    assert (data_cache / "processed" / "manifest.json").exists()
+    processed_dirs = list((data_cache / "processed").glob("*/manifest.json"))
+    assert len(processed_dirs) >= 1
 
 
 def test_plan_run_fast_sample_count(tmp_path):
@@ -101,6 +102,59 @@ def test_data_cache_round_trip(tmp_path):
     assert len(loaded["validation"]) == 1
 
     assert load_processed_cache(cache_dir, expected_hash="wrong") is None
+
+
+def test_parquet_cache_round_trip(tmp_path):
+    dataset_dict = TableDict(
+        {
+            "train": Table.from_dict({"text": ["alpha", "beta"]}),
+            "validation": Table.from_dict({"text": ["gamma"]}),
+        }
+    )
+    cache_dir = tmp_path / "parquet_cache"
+    save_processed_cache(cache_dir, dataset_dict, "parquet123", "sft")
+
+    manifest = json.loads((cache_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest.get("format") == "parquet"
+
+    loaded = load_processed_cache(cache_dir, expected_hash="parquet123")
+    assert loaded is not None
+    assert len(loaded["train"]) == 2
+    assert loaded["train"][0]["text"] == "alpha"
+
+
+def test_fresh_run_cache_hit(tmp_path, monkeypatch):
+    from ptk.config.loader import load_config
+    from ptk.pipeline import run_pipeline
+
+    config = load_config(Path(__file__).parent / "fixtures" / "sft.yaml")
+    data_path = tmp_path / "data.jsonl"
+    data_path.write_text(
+        "\n".join(json.dumps({"text": f"row {i} with enough length for filters"}) for i in range(20)) + "\n"
+    )
+    config.data.dataset.path = str(data_path)
+    config.output.dir = str(tmp_path / "outputs")
+    config.training.max_iters = 1
+    config.eval.benchmarks = []
+
+    logger = __import__("ptk.logging", fromlist=["Logger"]).Logger(machine=False, verbose=False)
+
+    preprocess_calls = {"count": 0}
+    original = __import__("ptk.data.pipeline", fromlist=["preprocess_dataset"]).preprocess_dataset
+
+    def counting_preprocess(*args, **kwargs):
+        preprocess_calls["count"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr("ptk.pipeline.preprocess_dataset", counting_preprocess)
+
+    run_pipeline(config, logger, skip_eval=True, skip_export=True)
+    first_count = preprocess_calls["count"]
+
+    run_pipeline(config, logger, skip_eval=True, skip_export=True)
+
+    assert first_count == 1
+    assert preprocess_calls["count"] == 1
 
 
 def test_merged_export_reuses_existing(tmp_path):

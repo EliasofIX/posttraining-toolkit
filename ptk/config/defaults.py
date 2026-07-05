@@ -56,6 +56,7 @@ def defaults_for_method(method: TrainingMethod) -> dict:
                 "learning_rate": 2e-4,
                 "batch_size": 2,
                 "epochs": 3,
+                "gradient_checkpointing": True,
                 "lora": LoRAConfig().model_dump(),
                 "quantization": QuantizationConfig().model_dump(),
             }
@@ -68,6 +69,7 @@ def defaults_for_method(method: TrainingMethod) -> dict:
                 "learning_rate": 5e-7,
                 "batch_size": 2,
                 "epochs": 1,
+                "gradient_checkpointing": True,
                 "rl": RLConfig(beta=0.1).model_dump(),
             }
         )
@@ -78,6 +80,7 @@ def defaults_for_method(method: TrainingMethod) -> dict:
                 "learning_rate": 1e-5,
                 "batch_size": 2,
                 "epochs": 1,
+                "gradient_checkpointing": True,
                 "rl": RLConfig(beta=0.1, reward_model="gpt2", kl_coef=0.05).model_dump(),
             }
         )
@@ -88,7 +91,8 @@ def defaults_for_method(method: TrainingMethod) -> dict:
                 "learning_rate": 5e-6,
                 "batch_size": 2,
                 "epochs": 1,
-                "rl": RLConfig(beta=0.04, num_generations=4).model_dump(),
+                "gradient_checkpointing": True,
+                "rl": RLConfig(beta=0.04, num_generations=2).model_dump(),
             }
         )
 

@@ -39,6 +39,14 @@ def load_raw_dataset(config: DatasetConfig) -> Table:
 
 
 def _load_jsonl(path: Path) -> Table:
+    try:
+        from datasets import load_dataset
+
+        ds = load_dataset("json", data_files=str(path), split="train")
+        return Table.from_dict(ds.to_dict())
+    except ImportError:
+        pass
+
     columns: list[str] = []
     data: dict[str, list] = {}
     with path.open(encoding="utf-8") as handle:

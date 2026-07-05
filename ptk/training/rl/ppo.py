@@ -16,8 +16,10 @@ from ptk.training.base_trainer import (
     TrainerResult,
     dataset_map_kwargs,
     dataloader_kwargs,
+    deepspeed_kwargs,
     is_distributed,
     prepare_tokenizer,
+    resolve_resume_checkpoint,
 )
 
 os.environ.setdefault("TRL_EXPERIMENTAL_SILENCE", "1")
@@ -103,11 +105,13 @@ class PPOTrainerWrapper(BaseTrainer):
         def tokenize(example):
             return tokenizer(example["text"], truncation=True, max_length=t.max_seq_length)
 
-        train_ds = hf_data["train"].map(
-            tokenize,
-            remove_columns=hf_data["train"].column_names,
-            **dataset_map_kwargs(t),
-        )
+        train_ds = hf_data["train"]
+        if t.pretokenize_dataset:
+            train_ds = train_ds.map(
+                tokenize,
+                remove_columns=hf_data["train"].column_names,
+                **dataset_map_kwargs(t),
+            )
 
         max_steps = t.max_iters or 2
         batch_size = max(1, t.batch_size * t.gradient_accumulation_steps)
@@ -129,6 +133,7 @@ class PPOTrainerWrapper(BaseTrainer):
             bf16=precision == "bf16",
             gradient_checkpointing=t.gradient_checkpointing,
             **dataloader_kwargs(t),
+            **deepspeed_kwargs(self.config),
         )
 
         trainer = PPOTrainer(
@@ -141,8 +146,9 @@ class PPOTrainerWrapper(BaseTrainer):
             value_model=value_model,
         )
 
-        if resume_from:
-            trainer.train(resume_from_checkpoint=str(resume_from))
+        checkpoint = resolve_resume_checkpoint(self.output_dir, resume_from)
+        if checkpoint:
+            trainer.train(resume_from_checkpoint=checkpoint)
         else:
             trainer.train()
 

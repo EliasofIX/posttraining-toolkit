@@ -9,10 +9,12 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from ptk.config.hardware_defaults import apply_hardware_defaults
 from ptk.config.loader import config_to_yaml
 from ptk.config.schema import ComputeStrategy, DataSource, PTKConfig
 from ptk.data.generation import generate_synthetic_data
 from ptk.data.pipeline import (
+    compute_data_cache_key,
     dataset_stats,
     hash_dataset,
     load_processed_cache,
@@ -21,12 +23,18 @@ from ptk.data.pipeline import (
 )
 from ptk.data.table import TableDict
 from ptk.distributed.accelerate_gen import generate_accelerate_config
-from ptk.distributed.detect import detect_environment
+from ptk.distributed.deepspeed_gen import generate_deepspeed_config
+from ptk.distributed.detect import (
+    detect_environment,
+    distributed_barrier,
+    is_main_process,
+    wait_for_cache_manifest,
+)
 from ptk.eval.harness import EvalHarness
 from ptk.export.formats import export_run
 from ptk.logging import Logger
 from ptk.registry.runs import RunRegistry, RunStatus
-from ptk.training.base_trainer import get_trainer
+from ptk.training.base_trainer import get_trainer, resolve_resume_checkpoint
 
 
 def plan_run(config: PTKConfig) -> dict[str, Any]:
@@ -37,8 +45,10 @@ def plan_run(config: PTKConfig) -> dict[str, Any]:
         nodes=config.compute.nodes,
         gpus_per_node=config.compute.gpus_per_node,
     )
+    config = apply_hardware_defaults(config, env)
 
     n_samples = 0
+    cache_hit = False
     if config.data.source == DataSource.SYNTHETIC and config.data.synthetic:
         n_samples = config.data.synthetic.n_samples
     elif config.data.dataset:
@@ -49,12 +59,17 @@ def plan_run(config: PTKConfig) -> dict[str, Any]:
         except Exception:
             n_samples = 0
 
+        cache_key = compute_data_cache_key(config.data, config.method)
+        cache_dir = config.output_path() / "data_cache" / "processed" / cache_key
+        cache_hit = (cache_dir / "manifest.json").exists()
+
     t = config.training
     steps_per_epoch = max(1, n_samples // max(t.batch_size * t.gradient_accumulation_steps, 1))
     total_steps = t.max_iters or (steps_per_epoch * t.epochs)
 
     gpu_hours = total_steps * 0.001 * max(env.num_gpus, 1)
     disk_mb = n_samples * 0.5 + 500
+    preprocess_seconds = 0.0 if cache_hit else round(max(n_samples, 1) * 0.0001, 2)
 
     return {
         "run_name": config.run_name,
@@ -67,6 +82,8 @@ def plan_run(config: PTKConfig) -> dict[str, Any]:
         "estimated_steps": total_steps,
         "estimated_gpu_hours": round(gpu_hours, 3),
         "estimated_disk_mb": round(disk_mb, 1),
+        "estimated_preprocess_seconds": preprocess_seconds,
+        "data_cache_hit": cache_hit,
         "warnings": env.warnings,
         "output_dir": str(config.output_path()),
     }
@@ -87,6 +104,26 @@ def _should_launch_distributed(env) -> bool:
         and not _is_distributed_active()
         and shutil.which("accelerate") is not None
     )
+
+
+def _ensure_deepspeed_config(config: PTKConfig, env, output_dir: Path) -> PTKConfig:
+    """Auto-generate DeepSpeed config for multi-GPU when not explicitly set."""
+    if config.compute.deepspeed_config:
+        return config
+    if env.strategy not in (ComputeStrategy.MULTI_GPU, ComputeStrategy.MULTI_NODE):
+        return config
+    if env.device.value != "cuda":
+        return config
+
+    ds_path = output_dir / "deepspeed_config.json"
+    generate_deepspeed_config(
+        env,
+        ds_path,
+        gradient_accumulation_steps=config.training.gradient_accumulation_steps,
+        train_batch_size=config.training.batch_size,
+    )
+    compute = config.compute.model_copy(update={"deepspeed_config": str(ds_path)})
+    return config.model_copy(update={"compute": compute})
 
 
 def _launch_distributed(
@@ -111,14 +148,17 @@ def _launch_distributed(
         nodes=config.compute.nodes,
         gpus_per_node=config.compute.gpus_per_node,
     )
+    config = apply_hardware_defaults(config, env)
     output_dir = config.output_path()
     output_dir.mkdir(parents=True, exist_ok=True)
+    config = _ensure_deepspeed_config(config, env, output_dir)
 
     if config.compute.accelerate_config:
         accel_cfg = Path(config.compute.accelerate_config)
     else:
         accel_cfg = output_dir / "accelerate_config.yaml"
-        generate_accelerate_config(env, accel_cfg)
+        deepspeed_path = Path(config.compute.deepspeed_config) if config.compute.deepspeed_config else None
+        generate_accelerate_config(env, accel_cfg, deepspeed_config=deepspeed_path)
 
     config_path = output_dir / "pipeline_config.yaml"
     config_path.write_text(config_to_yaml(config), encoding="utf-8")
@@ -183,6 +223,7 @@ def run_pipeline(
         nodes=config.compute.nodes,
         gpus_per_node=config.compute.gpus_per_node,
     )
+    config = apply_hardware_defaults(config, env)
 
     if _should_launch_distributed(env):
         return _launch_distributed(
@@ -204,21 +245,28 @@ def run_pipeline(
     try:
         existing_hash = record.data_hash if run_id and record else None
         dataset_dict = _prepare_data(config, logger, existing_data_hash=existing_hash)
+        distributed_barrier()
 
         content_hash = hash_dataset(dataset_dict)
-        registry.update_run(run_id, status=RunStatus.TRAINING, data_hash=content_hash)
+        if is_main_process():
+            registry.update_run(run_id, status=RunStatus.TRAINING, data_hash=content_hash)
+
+        if resume_from is None and run_id and record:
+            resume_from = registry.find_latest_checkpoint(run_id)
+
         trainer = get_trainer(config, env, logger)
         result = trainer.train(dataset_dict, resume_from=resume_from)
 
-        registry.update_run(
-            run_id,
-            status=RunStatus.EVAL if not skip_eval and config.eval.benchmarks else RunStatus.EXPORT,
-            checkpoint_path=str(result.checkpoint_path) if result.checkpoint_path else None,
-            global_step=result.global_step,
-            metrics=result.metrics,
-        )
+        if is_main_process():
+            registry.update_run(
+                run_id,
+                status=RunStatus.EVAL if not skip_eval and config.eval.benchmarks else RunStatus.EXPORT,
+                checkpoint_path=str(result.checkpoint_path) if result.checkpoint_path else None,
+                global_step=result.global_step,
+                metrics=result.metrics,
+            )
 
-        if not skip_eval and config.eval.benchmarks:
+        if not skip_eval and config.eval.benchmarks and is_main_process():
             harness = EvalHarness(logger)
             if result.model is not None and result.tokenizer is not None:
                 eval_results = harness.run_with_model(config, result.model, result.tokenizer)
@@ -229,17 +277,29 @@ def run_pipeline(
                 eval_results = harness.run(config, checkpoint_path=result.checkpoint_path)
                 _save_eval_results(config, eval_results)
 
-        registry.update_run(run_id, status=RunStatus.EXPORT)
+        distributed_barrier()
 
-        if not skip_export:
-            export_run(config, checkpoint_path=result.checkpoint_path, logger=logger)
+        if is_main_process():
+            registry.update_run(run_id, status=RunStatus.EXPORT)
 
-        registry.update_run(run_id, status=RunStatus.COMPLETED)
-        logger.complete("Pipeline complete", run_id=run_id)
+            if not skip_export:
+                export_run(
+                    config,
+                    checkpoint_path=result.checkpoint_path,
+                    logger=logger,
+                    model=result.model,
+                    tokenizer=result.tokenizer,
+                )
+
+            registry.update_run(run_id, status=RunStatus.COMPLETED)
+            logger.complete("Pipeline complete", run_id=run_id)
+
+        distributed_barrier()
         return run_id
 
     except Exception as exc:
-        registry.update_run(run_id, status=RunStatus.FAILED, error=str(exc))
+        if is_main_process():
+            registry.update_run(run_id, status=RunStatus.FAILED, error=str(exc))
         raise
 
 
@@ -255,7 +315,18 @@ def _prepare_data(
     *,
     existing_data_hash: str | None = None,
 ) -> TableDict:
-    cache_dir = config.output_path() / "data_cache" / "processed"
+    cache_key = compute_data_cache_key(config.data, config.method)
+    cache_dir = config.output_path() / "data_cache" / "processed" / cache_key
+
+    if not is_main_process():
+        wait_for_cache_manifest(cache_dir)
+        cached = load_processed_cache(cache_dir, expected_hash=existing_data_hash)
+        if cached is not None:
+            return cached
+        cached = load_processed_cache(cache_dir)
+        if cached is not None:
+            return cached
+        raise RuntimeError(f"Rank > 0 could not load processed cache from {cache_dir}")
 
     if existing_data_hash:
         cached = load_processed_cache(cache_dir, expected_hash=existing_data_hash)
@@ -264,16 +335,26 @@ def _prepare_data(
             logger.complete("Loaded cached dataset", **stats, hash=existing_data_hash)
             return cached
 
+    cached = load_processed_cache(cache_dir)
+    if cached is not None:
+        stats = dataset_stats(cached)
+        logger.complete("Loaded cached dataset", **stats, cache_key=cache_key)
+        return cached
+
     if config.data.source == DataSource.SYNTHETIC:
         raw = generate_synthetic_data(config, logger)
-        split = raw.train_test_split(test_size=0.1, seed=config.data.seed)
+        split = raw.train_test_split(test_size=1.0 - config.data.train_split, seed=config.data.seed)
         dataset_dict = TableDict({"train": split["train"], "validation": split["test"]})
         content_hash = hash_dataset(dataset_dict)
         save_processed_cache(cache_dir, dataset_dict, content_hash, config.method.value)
         return dataset_dict
 
     logger.start("Loading dataset")
-    dataset_dict = preprocess_dataset(config.data, config.method)
+    dataset_dict = preprocess_dataset(
+        config.data,
+        config.method,
+        num_proc=config.training.dataset_num_proc,
+    )
     stats = dataset_stats(dataset_dict)
     logger.complete("Dataset ready", **stats)
 

@@ -214,6 +214,21 @@ Generate fixture data or switch to `data.source: synthetic`.
 
 Non-fatal. Check `HF_TOKEN` env var. Export artifacts locally via `ptk export`.
 
+### 5.8 Processed Cache / Rank Barrier
+
+- **Symptom:** `TimeoutError: Timed out waiting for processed cache manifest` (exit code 2)
+- **Cause:** Non-zero ranks started before rank 0 finished writing `data_cache/processed/<cache_key>/manifest.json`
+- **Fix:**
+  1. Confirm rank 0 can write to `output.dir` (shared filesystem on multi-node).
+  2. Increase wait via `PTK_CACHE_WAIT_SECONDS` env (default 600).
+  3. Re-run; cache is content-keyed by dataset mtime + data config hash.
+
+### 5.9 Cache Key Mismatch on Resume
+
+- **Symptom:** Resume re-preprocesses dataset despite prior run on same data
+- **Cause:** Dataset file changed (mtime), data filters/split config changed, or different `output.dir`/`run_name` path
+- **Fix:** Use identical data config; cache lives under `{output.dir}/{run_name}/data_cache/processed/{cache_key}/`
+
 ---
 
 ## 6. Hardware Decision Matrix
@@ -293,6 +308,7 @@ ptk validate tests/fixtures/sft.yaml --json
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-07-05 | Efficiency overhaul: Parquet cache, rank-0 gating, hardware defaults, DPO fp16, lazy PPO tokenization, DeepSpeed wiring, batched eval | agent |
 | 2026-07-03 | Pipeline optimizations: eval skip fix, data cache, DPO memory, distributed launch, dataloader knobs | agent |
 | 2026-07-01 | GGUF native GPT-2 converter, PPO/GRPO e2e tests, GitHub Actions CI | bootstrap |
 | 2026-07-01 | Initial AGENTS.md — full toolkit v0.1 | bootstrap |

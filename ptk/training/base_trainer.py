@@ -86,6 +86,8 @@ class BaseTrainer(ABC):
         t = self.config.training
         precision = resolve_mixed_precision(self.env.device, self.config.compute.mixed_precision)
         device = torch_device_string(self.env.device)
+        run_mid_training_eval = has_validation and bool(self.config.eval.benchmarks)
+        eval_steps = self.config.eval.eval_steps if run_mid_training_eval else t.save_steps
         return {
             "output_dir": str(self.output_dir),
             "num_train_epochs": t.epochs,
@@ -97,8 +99,9 @@ class BaseTrainer(ABC):
             "weight_decay": t.weight_decay,
             "logging_steps": t.logging_steps,
             "save_steps": t.save_steps,
-            "eval_strategy": "steps" if has_validation else "no",
-            "eval_steps": t.save_steps,
+            "save_strategy": t.save_strategy,
+            "eval_strategy": "steps" if run_mid_training_eval else "no",
+            "eval_steps": eval_steps,
             "save_total_limit": 3,
             "load_best_model_at_end": False,
             "report_to": "none",
@@ -110,6 +113,7 @@ class BaseTrainer(ABC):
             "bf16": precision == "bf16",
             "gradient_checkpointing": t.gradient_checkpointing,
             **dataloader_kwargs(t),
+            **deepspeed_kwargs(self.config),
         }
 
     def save_training_metadata(self, result: TrainerResult) -> None:
@@ -150,7 +154,36 @@ def dataloader_kwargs(training: TrainingConfig) -> dict[str, Any]:
         kwargs["dataloader_num_workers"] = training.dataloader_num_workers
     if training.dataloader_pin_memory is not None:
         kwargs["dataloader_pin_memory"] = training.dataloader_pin_memory
+    if training.dataloader_prefetch_factor is not None:
+        kwargs["dataloader_prefetch_factor"] = training.dataloader_prefetch_factor
+    if training.dataloader_persistent_workers is not None:
+        kwargs["dataloader_persistent_workers"] = training.dataloader_persistent_workers
     return kwargs
+
+
+def deepspeed_kwargs(config: PTKConfig) -> dict[str, Any]:
+    """Pass DeepSpeed config path to TRL/HF when configured."""
+    if config.compute.deepspeed_config:
+        return {"deepspeed": config.compute.deepspeed_config}
+    return {}
+
+
+def resolve_resume_checkpoint(output_dir: Path, resume_from: Path | None = None) -> str | None:
+    """Resolve the best checkpoint path for resume."""
+    if resume_from is not None and resume_from.exists():
+        return str(resume_from)
+
+    checkpoints = sorted(
+        output_dir.glob("checkpoint-*"),
+        key=lambda path: int(path.name.rsplit("-", maxsplit=1)[-1]),
+    )
+    if checkpoints:
+        return str(checkpoints[-1])
+
+    final = output_dir / "final"
+    if final.exists():
+        return str(final)
+    return None
 
 
 def dataset_map_kwargs(training: TrainingConfig) -> dict[str, Any]:
