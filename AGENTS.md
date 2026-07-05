@@ -330,3 +330,17 @@ LIST      → ptk list --json
 ```
 
 **Golden rule:** Schema → Validate → Plan → Run. Never invert this order.
+
+---
+
+## 11. Cursor Cloud specific instructions
+
+Durable notes for agents running in the Cursor Cloud VM (dependencies already installed by the startup update script `pip install -e ".[dev,gguf]"`).
+
+- **Runtime:** Python 3.12, **CPU-only** (no CUDA/MPS). `ptk plan` resolves `device: cpu`. Use CPU smoke configs (`tests/fixtures/sft.yaml` is a ready-made SFT smoke on `distilgpt2`). The `[cuda]` extra (bitsandbytes/DeepSpeed) is not installed and not usable here.
+- **CLI on PATH:** `ptk` (and `pytest`, `ruff`) install to `~/.local/bin`, which is already on PATH — no activation step needed.
+- **No server/GUI:** `ptk` is a batch CLI; there is nothing to "serve". A working demo = a completed `ptk run` (data → train → eval → export) plus the run showing `status: completed` in `ptk list --json`.
+- **Network:** HF Hub is reachable, so base models like `distilgpt2` download on first `ptk run`.
+- **Standard commands** (from `.github/workflows/ci.yml`): lint `ruff check ptk tests`; unit tests `pytest tests/ -m "not slow"` (fast, ~3s); slow integration `pytest tests/test_integration.py tests/test_gguf_export.py -m slow` (SFT/PPO/GRPO/GGUF on CPU).
+- **Lint caveat:** `ruff` is pinned only `>=0.3.0`, so the VM installs a newer ruff (0.15.x) that flags a pre-existing import-order issue in `tests/test_hub_client.py` (`ruff check` exits 1). This is not caused by environment setup; do not "fix" it as part of setup.
+- **Outputs are gitignored:** `test_outputs/` and `.ptk/` (registry) are produced by runs and ignored by git — safe to leave in place between runs.
