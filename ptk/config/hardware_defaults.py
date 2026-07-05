@@ -40,8 +40,9 @@ def apply_hardware_defaults(
         TrainingMethod.PPO,
         TrainingMethod.GRPO,
     ):
-        if not t.gradient_checkpointing:
-            training_updates["gradient_checkpointing"] = True
+        # Only recommend gradient checkpointing via method defaults in defaults.py.
+        # Do not override an explicit training.gradient_checkpointing: false.
+        pass
 
     if not training_updates:
         return config

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from pathlib import Path
 
 from ptk.config.schema import PTKConfig
@@ -22,13 +24,26 @@ def load_seed_prompts(path: str | None) -> list[str]:
     return [line.strip() for line in lines if line.strip()]
 
 
-def _raw_cache_path(config: PTKConfig) -> Path:
+def _raw_cache_key(config: PTKConfig) -> str:
     assert config.data.synthetic is not None
     syn = config.data.synthetic
+    payload: dict = {
+        "base_model": config.base_model,
+        "synthetic": syn.model_dump(mode="json"),
+        "seed_prompts": load_seed_prompts(syn.seed_prompts),
+    }
+    if syn.seed_prompts:
+        seed_path = Path(syn.seed_prompts)
+        if seed_path.exists():
+            payload["seed_prompts_mtime_ns"] = seed_path.stat().st_mtime_ns
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+    return digest[:16]
+
+
+def _raw_cache_path(config: PTKConfig) -> Path:
     cache_dir = config.output_path() / "data_cache" / "raw"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    key = f"{syn.backend.value}_{syn.n_samples}_{syn.model or config.base_model}"
-    return cache_dir / f"{key}.jsonl"
+    return cache_dir / f"{_raw_cache_key(config)}.jsonl"
 
 
 def _load_raw_cache(path: Path) -> Table | None:

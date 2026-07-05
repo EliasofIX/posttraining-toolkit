@@ -61,7 +61,7 @@ def plan_run(config: PTKConfig) -> dict[str, Any]:
 
         cache_key = compute_data_cache_key(config.data, config.method)
         cache_dir = config.output_path() / "data_cache" / "processed" / cache_key
-        cache_hit = (cache_dir / "manifest.json").exists()
+        cache_hit = (cache_dir / ".ready").exists() and (cache_dir / "manifest.json").exists()
 
     t = config.training
     steps_per_epoch = max(1, n_samples // max(t.batch_size * t.gradient_accumulation_steps, 1))
@@ -251,7 +251,8 @@ def run_pipeline(
         if is_main_process():
             registry.update_run(run_id, status=RunStatus.TRAINING, data_hash=content_hash)
 
-        if resume_from is None and run_id and record:
+        resume_requested = resume_from is not None or os.environ.get("PTK_RESUME_FROM") is not None
+        if resume_from is None and resume_requested and run_id:
             resume_from = registry.find_latest_checkpoint(run_id)
 
         trainer = get_trainer(config, env, logger)
@@ -321,12 +322,9 @@ def _prepare_data(
     if not is_main_process():
         wait_for_cache_manifest(cache_dir)
         cached = load_processed_cache(cache_dir, expected_hash=existing_data_hash)
-        if cached is not None:
-            return cached
-        cached = load_processed_cache(cache_dir)
-        if cached is not None:
-            return cached
-        raise RuntimeError(f"Rank > 0 could not load processed cache from {cache_dir}")
+        if cached is None:
+            raise RuntimeError(f"Rank > 0 could not load processed cache from {cache_dir}")
+        return cached
 
     if existing_data_hash:
         cached = load_processed_cache(cache_dir, expected_hash=existing_data_hash)
@@ -346,7 +344,7 @@ def _prepare_data(
         split = raw.train_test_split(test_size=1.0 - config.data.train_split, seed=config.data.seed)
         dataset_dict = TableDict({"train": split["train"], "validation": split["test"]})
         content_hash = hash_dataset(dataset_dict)
-        save_processed_cache(cache_dir, dataset_dict, content_hash, config.method.value)
+        save_processed_cache(cache_dir, dataset_dict, content_hash, config.method.value, cache_key=cache_key)
         return dataset_dict
 
     logger.start("Loading dataset")
@@ -359,5 +357,5 @@ def _prepare_data(
     logger.complete("Dataset ready", **stats)
 
     content_hash = hash_dataset(dataset_dict)
-    save_processed_cache(cache_dir, dataset_dict, content_hash, config.method.value)
+    save_processed_cache(cache_dir, dataset_dict, content_hash, config.method.value, cache_key=cache_key)
     return dataset_dict

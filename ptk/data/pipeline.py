@@ -12,6 +12,8 @@ from ptk.config.schema import DataConfig, DatasetConfig, SyntheticFilters, Train
 from ptk.data.loaders import load_raw_dataset, normalize_dpo_columns, normalize_sft_columns
 from ptk.data.table import Table, TableDict
 
+ALLOWED_CACHE_SPLITS = frozenset({"train", "validation", "test"})
+
 
 def preprocess_dataset(
     config: DataConfig,
@@ -287,18 +289,33 @@ def compute_data_cache_key(config: DataConfig, method: TrainingMethod) -> str:
     return digest[:16]
 
 
-def save_processed_cache(cache_dir: Path, dataset_dict: TableDict, content_hash: str, method: str) -> None:
+def save_processed_cache(
+    cache_dir: Path,
+    dataset_dict: TableDict,
+    content_hash: str,
+    method: str,
+    *,
+    cache_key: str | None = None,
+) -> None:
     """Persist preprocessed splits as Parquet (with JSONL fallback)."""
     cache_dir.mkdir(parents=True, exist_ok=True)
+    ready_marker = cache_dir / ".ready"
+    if ready_marker.exists():
+        ready_marker.unlink()
+
     format_used = "parquet"
     try:
         for split_name, table in dataset_dict.items():
+            if split_name not in ALLOWED_CACHE_SPLITS:
+                raise ValueError(f"Invalid cache split name: {split_name}")
             split_dir = cache_dir / split_name
             split_dir.mkdir(parents=True, exist_ok=True)
             _table_to_parquet(table, split_dir / "data.parquet")
     except Exception:
         format_used = "jsonl"
         for split_name, table in dataset_dict.items():
+            if split_name not in ALLOWED_CACHE_SPLITS:
+                raise ValueError(f"Invalid cache split name: {split_name}")
             table.save_jsonl(cache_dir / split_name)
 
     manifest = {
@@ -306,25 +323,35 @@ def save_processed_cache(cache_dir: Path, dataset_dict: TableDict, content_hash:
         "method": method,
         "splits": list(dataset_dict.keys()),
         "format": format_used,
+        "cache_key": cache_key or cache_dir.name,
     }
     (cache_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    ready_marker.write_text("ok", encoding="utf-8")
 
 
 def load_processed_cache(cache_dir: Path, expected_hash: str | None = None) -> TableDict | None:
     """Load cached preprocessed splits when hash matches."""
     manifest_path = cache_dir / "manifest.json"
-    if not manifest_path.exists():
+    ready_marker = cache_dir / ".ready"
+    if not manifest_path.exists() or not ready_marker.exists():
         return None
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("cache_key") and manifest["cache_key"] != cache_dir.name:
+        return None
     if expected_hash and manifest.get("hash") != expected_hash:
         return None
 
     splits = manifest.get("splits", ["train", "validation"])
     cache_format = manifest.get("format", "jsonl")
+    cache_root = cache_dir.resolve()
     dataset_dict = TableDict()
     for split_name in splits:
-        split_dir = cache_dir / split_name
+        if split_name not in ALLOWED_CACHE_SPLITS:
+            return None
+        split_dir = (cache_dir / split_name).resolve()
+        if not split_dir.is_relative_to(cache_root):
+            return None
         if cache_format == "parquet":
             parquet_path = split_dir / "data.parquet"
             if not parquet_path.exists():

@@ -168,10 +168,17 @@ def deepspeed_kwargs(config: PTKConfig) -> dict[str, Any]:
     return {}
 
 
-def resolve_resume_checkpoint(output_dir: Path, resume_from: Path | None = None) -> str | None:
-    """Resolve the best checkpoint path for resume."""
+def resolve_resume_checkpoint(
+    output_dir: Path,
+    resume_from: Path | None = None,
+    *,
+    auto_resume: bool = False,
+) -> str | None:
+    """Resolve checkpoint path for resume; auto-scan only when explicitly requested."""
     if resume_from is not None and resume_from.exists():
         return str(resume_from)
+    if not auto_resume:
+        return None
 
     checkpoints = sorted(
         output_dir.glob("checkpoint-*"),

@@ -98,7 +98,7 @@ class QLoRATrainer(BaseTrainer):
             processing_class=tokenizer,
         )
 
-        checkpoint = resolve_resume_checkpoint(self.output_dir, resume_from)
+        checkpoint = resolve_resume_checkpoint(self.output_dir, resume_from, auto_resume=resume_from is not None)
         if checkpoint:
             trainer.train(resume_from_checkpoint=checkpoint)
         else:

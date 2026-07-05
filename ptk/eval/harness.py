@@ -119,24 +119,23 @@ class EvalHarness:
 
     def _load_eval_texts(self, config: PTKConfig, limit: int) -> list[str]:
         """Sample evaluation texts from cached validation split when available."""
-        cache_root = config.output_path() / "data_cache" / "processed"
-        if not cache_root.exists():
+        from ptk.data.pipeline import compute_data_cache_key
+
+        cache_key = compute_data_cache_key(config.data, config.method)
+        cache_dir = config.output_path() / "data_cache" / "processed" / cache_key
+        cached = load_processed_cache(cache_dir)
+        if cached is None or "validation" not in cached:
             return []
 
-        candidates = sorted(cache_root.glob("*/manifest.json"))
-        for manifest_path in reversed(candidates):
-            cached = load_processed_cache(manifest_path.parent)
-            if cached is None or "validation" not in cached:
-                continue
-            validation = cached["validation"]
-            text_key = "text" if "text" in validation.column_names else "prompt"
-            texts = [str(validation[i].get(text_key, "")) for i in range(len(validation))]
-            texts = [text for text in texts if text.strip()]
-            if texts:
-                random.seed(config.data.seed)
-                random.shuffle(texts)
-                return texts[:limit]
-        return []
+        validation = cached["validation"]
+        text_key = "text" if "text" in validation.column_names else "prompt"
+        texts = [str(validation[i].get(text_key, "")) for i in range(len(validation))]
+        texts = [text for text in texts if text.strip()]
+        if not texts:
+            return []
+        random.seed(config.data.seed)
+        random.shuffle(texts)
+        return texts[:limit]
 
     def _bench_perplexity(
         self,
@@ -160,10 +159,12 @@ class EvalHarness:
             padding=True,
         )
         inputs = {k: v.to(device) for k, v in inputs.items()}
+        labels = inputs["input_ids"].clone()
+        labels[inputs["attention_mask"] == 0] = -100
 
         with torch.no_grad():
-            outputs = model(**inputs, labels=inputs["input_ids"])
-            token_count = inputs["input_ids"].numel()
+            outputs = model(**inputs, labels=labels)
+            token_count = int(inputs["attention_mask"].sum().item())
             total_loss = outputs.loss.item() * token_count
 
         avg_loss = total_loss / max(token_count, 1)

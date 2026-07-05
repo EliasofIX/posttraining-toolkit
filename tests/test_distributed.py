@@ -48,6 +48,12 @@ def test_is_main_process():
     with patch.dict(os.environ, {"LOCAL_RANK": "1"}):
         assert is_main_process() is False
 
+    with patch.dict(os.environ, {"RANK": "2", "LOCAL_RANK": "0"}, clear=False):
+        assert is_main_process() is False
+
+    with patch.dict(os.environ, {"RANK": "0", "LOCAL_RANK": "0"}, clear=False):
+        assert is_main_process() is True
+
 
 def test_rank_zero_gates_data_prep(tmp_path, monkeypatch):
     from ptk.config.loader import load_config

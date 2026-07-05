@@ -180,11 +180,13 @@ def resolve_mixed_precision(device: DeviceType, requested: str) -> str:
 
 
 def is_main_process() -> bool:
-    """Return True on rank 0 in distributed runs."""
+    """Return True on global rank 0 in distributed runs."""
+    if os.environ.get("RANK") is not None:
+        return int(os.environ["RANK"]) == 0
     local_rank = os.environ.get("LOCAL_RANK")
     if local_rank is not None:
         return int(local_rank) == 0
-    return int(os.environ.get("RANK", "0")) == 0
+    return True
 
 
 def is_distributed_run() -> bool:
@@ -210,21 +212,20 @@ def distributed_barrier() -> None:
 
 
 def wait_for_cache_manifest(cache_dir: Path, *, timeout_seconds: float = 600.0) -> None:
-    """Block until rank 0 writes processed cache manifest."""
+    """Block until rank 0 finishes writing processed cache."""
     import time
 
     timeout_seconds = float(os.environ.get("PTK_CACHE_WAIT_SECONDS", timeout_seconds))
+    ready_marker = cache_dir / ".ready"
     manifest = cache_dir / "manifest.json"
-    if manifest.exists():
-        return
 
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        if manifest.exists():
+        if ready_marker.exists() and manifest.exists():
             return
         time.sleep(0.5)
 
-    raise TimeoutError(f"Timed out waiting for processed cache manifest: {manifest}")
+    raise TimeoutError(f"Timed out waiting for processed cache ready marker: {ready_marker}")
 
 
 def nvidia_smi_info() -> dict[str, Any] | None:
