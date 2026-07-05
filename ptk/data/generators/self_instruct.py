@@ -20,10 +20,12 @@ class SelfInstructGenerator:
         model: str = "distilgpt2",
         max_new_tokens: int = 128,
         device: DeviceType = DeviceType.AUTO,
+        batch_size: int = 4,
     ) -> None:
         self.model_name = model
         self.max_new_tokens = max_new_tokens
         self.device = detect_device(device)
+        self.batch_size = max(1, batch_size)
 
     def generate(self, seed_prompts: list[str], n_samples: int, **kwargs: Any) -> Table:
         device_str = torch_device_string(self.device)
@@ -42,23 +44,35 @@ class SelfInstructGenerator:
         ]
         records: list[dict[str, str]] = []
 
-        for i in range(n_samples):
-            seed = seeds[i % len(seeds)]
-            instruction = self._generate_text(model, tokenizer, device_str, seed)
-            critique_prompt = f"Answer this instruction helpfully:\n{instruction}\n\nResponse:"
-            response = self._generate_text(model, tokenizer, device_str, critique_prompt)
-            text = f"Instruction: {instruction.strip()}\nResponse: {response.strip()}"
-            if self._passes_filter(text):
-                records.append({"text": text})
+        for start in range(0, n_samples, self.batch_size):
+            batch_count = min(self.batch_size, n_samples - start)
+            batch_seeds = [seeds[(start + i) % len(seeds)] for i in range(batch_count)]
+            instructions = self._generate_batch(model, tokenizer, device_str, batch_seeds)
+            critique_prompts = [
+                f"Answer this instruction helpfully:\n{instruction}\n\nResponse:"
+                for instruction in instructions
+            ]
+            responses = self._generate_batch(model, tokenizer, device_str, critique_prompts)
+            for instruction, response in zip(instructions, responses, strict=True):
+                text = f"Instruction: {instruction.strip()}\nResponse: {response.strip()}"
+                if self._passes_filter(text):
+                    records.append({"text": text})
 
         if not records:
             records.append({"text": "Instruction: What is fine-tuning?\nResponse: Fine-tuning adapts a pretrained model to a specific task."})
 
         return Table.from_records(records)
 
-    def _generate_text(self, model, tokenizer, device: str, prompt: str) -> str:
-        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=256)
+    def _generate_batch(self, model, tokenizer, device: str, prompts: list[str]) -> list[str]:
+        inputs = tokenizer(
+            prompts,
+            return_tensors="pt",
+            truncation=True,
+            max_length=256,
+            padding=True,
+        )
         inputs = {k: v.to(device) for k, v in inputs.items()}
+        prompt_lengths = inputs["attention_mask"].sum(dim=1)
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
@@ -68,8 +82,11 @@ class SelfInstructGenerator:
                 top_p=0.9,
                 pad_token_id=tokenizer.pad_token_id,
             )
-        generated = outputs[0][inputs["input_ids"].shape[1] :]
-        return tokenizer.decode(generated, skip_special_tokens=True)
+        texts: list[str] = []
+        for row, prompt_len in zip(outputs, prompt_lengths, strict=True):
+            generated = row[int(prompt_len) :]
+            texts.append(tokenizer.decode(generated, skip_special_tokens=True))
+        return texts
 
     def _passes_filter(self, text: str) -> bool:
         return 20 <= len(text) <= 4096

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Semaphore
 from typing import Any
 
 from ptk.data.table import Table
@@ -18,10 +20,12 @@ class AnthropicGenerator:
         model: str = "claude-3-5-haiku-20241022",
         max_retries: int = 3,
         rate_limit_delay: float = 1.0,
+        max_concurrency: int = 4,
     ) -> None:
         self.model = model
         self.max_retries = max_retries
         self.rate_limit_delay = rate_limit_delay
+        self.max_concurrency = max(1, max_concurrency)
         self.total_tokens = 0
         self.total_cost_usd = 0.0
 
@@ -42,14 +46,23 @@ class AnthropicGenerator:
             ) from exc
 
         client = anthropic.Anthropic(api_key=api_key)
-        records: list[dict[str, str]] = []
         seeds = seed_prompts or ["Generate a helpful instruction-response pair for LLM fine-tuning."]
+        semaphore = Semaphore(self.max_concurrency)
+        records: list[dict[str, str]] = [{}] * n_samples
 
-        for i in range(n_samples):
-            seed = seeds[i % len(seeds)]
-            text = self._generate_one(client, seed)
-            records.append({"text": text})
-            time.sleep(self.rate_limit_delay)
+        def worker(index: int) -> tuple[int, str]:
+            seed = seeds[index % len(seeds)]
+            with semaphore:
+                text = self._generate_one(client, seed)
+                if self.rate_limit_delay:
+                    time.sleep(self.rate_limit_delay)
+            return index, text
+
+        with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
+            futures = [executor.submit(worker, i) for i in range(n_samples)]
+            for future in as_completed(futures):
+                index, text = future.result()
+                records[index] = {"text": text}
 
         return Table.from_records(records)
 

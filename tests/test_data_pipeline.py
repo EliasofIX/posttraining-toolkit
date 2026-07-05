@@ -1,8 +1,11 @@
 """Data pipeline tests."""
 
+import json
+from pathlib import Path
+
 from ptk.config.schema import SyntheticFilters, TrainingMethod
-from ptk.data.pipeline import apply_filters, deduplicate, split_dataset
-from ptk.data.table import Table
+from ptk.data.pipeline import apply_filters, deduplicate, load_processed_cache, save_processed_cache, split_dataset
+from ptk.data.table import Table, TableDict
 
 
 def test_deduplicate():
@@ -30,3 +33,22 @@ def test_split_dataset_single_row():
     split = split_dataset(ds, train_ratio=0.9, seed=42)
     assert len(split["train"]) == 1
     assert len(split["validation"]) == 0
+
+
+def test_parquet_cache_round_trip(tmp_path):
+    dataset_dict = TableDict(
+        {
+            "train": Table.from_dict({"text": ["alpha", "beta"]}),
+            "validation": Table.from_dict({"text": ["gamma"]}),
+        }
+    )
+    cache_dir = tmp_path / "parquet_cache"
+    save_processed_cache(cache_dir, dataset_dict, "parquet123", "sft")
+
+    manifest = json.loads((cache_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest.get("format") == "parquet"
+
+    loaded = load_processed_cache(cache_dir, expected_hash="parquet123")
+    assert loaded is not None
+    assert len(loaded["train"]) == 2
+    assert loaded["train"][0]["text"] == "alpha"
