@@ -9,13 +9,18 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+)
 
 from ptk.config.schema import PTKConfig
 from ptk.data.pipeline import load_processed_cache
 from ptk.distributed.detect import detect_environment, torch_device_string
 from ptk.logging import Logger
-from ptk.registry.runs import RunRegistry
+from ptk.registry.runs import RunRegistry, config_from_record
 
 BENCHMARKS: dict[str, dict[str, Any]] = {
     "perplexity": {
@@ -209,7 +214,7 @@ def eval_run(run_id: str, logger: Logger, benchmarks: list[str] | None = None) -
     if record is None:
         raise ValueError(f"Run not found: {run_id}")
 
-    config = PTKConfig.model_validate(record.config)
+    config = config_from_record(record)
     checkpoint = registry.find_latest_checkpoint(run_id)
     harness = EvalHarness(logger)
     results = harness.run(config, checkpoint_path=checkpoint, benchmarks=benchmarks)

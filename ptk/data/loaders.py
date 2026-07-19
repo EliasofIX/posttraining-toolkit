@@ -17,23 +17,34 @@ from ptk.hub.client import HubClient
 _HF_HUB_CANDIDATES = ("train.jsonl", "data.jsonl", "train.csv", "validation.jsonl")
 
 
-def load_raw_dataset(config: DatasetConfig) -> Table:
-    """Load a dataset from the configured source."""
-    path = config.path
+def load_raw_dataset(config: DatasetConfig, *, base_dir: Path | None = None) -> Table:
+    """Load a dataset from the configured source.
+
+    Relative paths are resolved against ``base_dir`` when provided (typically the
+    directory of the source config file).
+    """
+    from ptk.config.loader import resolve_dataset_path
+
     fmt = config.format
 
     if fmt == DatasetFormat.HF_HUB:
-        return _load_hf_hub(path)
+        return _load_hf_hub(config.path)
 
-    if not Path(path).exists():
+    path = resolve_dataset_path(config.path, config_dir=base_dir)
+    if not path.exists():
         raise ValidationError(f"Dataset path not found: {path}", field_path="data.dataset.path")
+    if path.is_dir():
+        raise ValidationError(
+            f"Dataset path is a directory, expected a file: {path}",
+            field_path="data.dataset.path",
+        )
 
     if fmt == DatasetFormat.JSONL:
-        return _load_jsonl(Path(path))
+        return _load_jsonl(path)
     if fmt == DatasetFormat.CSV:
-        return _load_csv(Path(path))
+        return _load_csv(path)
     if fmt == DatasetFormat.PARQUET:
-        return _load_parquet(Path(path))
+        return _load_parquet(path)
 
     raise ValidationError(f"Unsupported dataset format: {fmt}", field_path="data.dataset.format")
 
@@ -124,13 +135,15 @@ def _load_hf_hub(repo_id: str) -> Table:
     )
 
 
-def count_dataset_samples(config: DatasetConfig) -> int:
+def count_dataset_samples(config: DatasetConfig, *, base_dir: Path | None = None) -> int:
     """Fast row count without loading full dataset into memory."""
+    from ptk.config.loader import resolve_dataset_path
+
     if config.format == DatasetFormat.HF_HUB:
         return 0
 
-    path = Path(config.path)
-    if not path.exists():
+    path = resolve_dataset_path(config.path, config_dir=base_dir)
+    if not path.exists() or path.is_dir():
         return 0
 
     if config.format == DatasetFormat.JSONL:

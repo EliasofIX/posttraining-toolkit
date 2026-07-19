@@ -11,7 +11,13 @@ from trl import SFTTrainer as TRLSFTTrainer
 
 from ptk.data.hf_adapter import to_hf_dataset_dict
 from ptk.data.table import TableDict
-from ptk.training.base_trainer import BaseTrainer, TrainerResult, place_model, prepare_tokenizer, resolve_resume_checkpoint
+from ptk.training.base_trainer import (
+    BaseTrainer,
+    TrainerResult,
+    place_model,
+    prepare_tokenizer,
+    resolve_resume_checkpoint,
+)
 
 
 class LoRATrainer(BaseTrainer):

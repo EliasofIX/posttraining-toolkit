@@ -41,6 +41,24 @@ def test_sft_e2e_cpu(tmp_path):
 
 
 @pytest.mark.slow
+def test_lora_e2e_cpu(tmp_path):
+    """LoRA pipeline smoke test on distilgpt2."""
+    _run_e2e("lora.yaml", tmp_path, min_steps=1)
+
+
+@pytest.mark.slow
+def test_qlora_cpu_fallback_e2e(tmp_path):
+    """QLoRA on CPU exercises the non-quantized LoRA fallback path."""
+    _run_e2e("qlora.yaml", tmp_path, min_steps=1)
+
+
+@pytest.mark.slow
+def test_dpo_e2e_cpu(tmp_path):
+    """DPO pipeline smoke test on distilgpt2."""
+    _run_e2e("dpo.yaml", tmp_path, min_steps=1)
+
+
+@pytest.mark.slow
 def test_ppo_e2e_cpu(tmp_path):
     """PPO pipeline smoke test on distilgpt2."""
     _run_e2e("ppo.yaml", tmp_path, min_steps=1)

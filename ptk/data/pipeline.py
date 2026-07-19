@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ptk.config.schema import DataConfig, DatasetConfig, SyntheticFilters, TrainingMethod
+from ptk.config.schema import DataConfig, SyntheticFilters, TrainingMethod
 from ptk.data.loaders import load_raw_dataset, normalize_dpo_columns, normalize_sft_columns
 from ptk.data.table import Table, TableDict
 
@@ -20,13 +20,14 @@ def preprocess_dataset(
     method: TrainingMethod,
     *,
     num_proc: int | None = None,
+    base_dir: Path | None = None,
 ) -> TableDict:
     """Full data pipeline: load → normalize → filter → dedup → split."""
     if config.source.value == "dataset":
         assert config.dataset is not None
         if config.dataset.streaming:
-            return _preprocess_streaming(config, method, num_proc=num_proc)
-        dataset = load_raw_dataset(config.dataset)
+            return _preprocess_streaming(config, method, num_proc=num_proc, base_dir=base_dir)
+        dataset = load_raw_dataset(config.dataset, base_dir=base_dir)
         if method in (TrainingMethod.DPO,):
             dataset = normalize_dpo_columns(dataset, config.dataset)
         else:
@@ -50,19 +51,22 @@ def _preprocess_streaming(
     method: TrainingMethod,
     *,
     num_proc: int | None = None,
+    base_dir: Path | None = None,
 ) -> TableDict:
     """Streaming preprocess path — loads without full in-memory materialization."""
     assert config.dataset is not None
     from datasets import load_dataset
 
-    path = config.dataset.path
+    from ptk.config.loader import resolve_dataset_path
+
+    path = str(resolve_dataset_path(config.dataset.path, config_dir=base_dir))
     fmt = config.dataset.format.value
     if fmt == "jsonl":
         hf_ds = load_dataset("json", data_files=path, split="train", streaming=True)
     elif fmt == "csv":
         hf_ds = load_dataset("csv", data_files=path, split="train", streaming=True)
     else:
-        dataset = load_raw_dataset(config.dataset)
+        dataset = load_raw_dataset(config.dataset, base_dir=base_dir)
         filters = config.synthetic.filters if config.synthetic else SyntheticFilters()
         return _preprocess_table(dataset, filters, method=method, num_proc=num_proc)
 

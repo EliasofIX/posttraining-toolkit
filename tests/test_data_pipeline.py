@@ -1,10 +1,15 @@
 """Data pipeline tests."""
 
 import json
-from pathlib import Path
 
 from ptk.config.schema import SyntheticFilters, TrainingMethod
-from ptk.data.pipeline import apply_filters, deduplicate, load_processed_cache, save_processed_cache, split_dataset
+from ptk.data.pipeline import (
+    apply_filters,
+    deduplicate,
+    load_processed_cache,
+    save_processed_cache,
+    split_dataset,
+)
 from ptk.data.table import Table, TableDict
 
 

@@ -12,13 +12,16 @@ def test_create_and_list_runs(tmp_path):
     store = LocalStore(tmp_path / "registry")
     registry = RunRegistry(store=store)
     config = scaffold_config(TrainingMethod.SFT, run_name="registry-test")
+    config.set_config_dir(tmp_path)
     record = registry.create_run(config)
     assert record.run_id
     assert record.status == RunStatus.PENDING
+    assert record.config_dir == str(tmp_path.resolve())
 
     fetched = registry.get_run(record.run_id)
     assert fetched is not None
     assert fetched.run_name == "registry-test"
+    assert fetched.config_dir == str(tmp_path.resolve())
 
     registry.update_run(record.run_id, status=RunStatus.COMPLETED, global_step=10)
     updated = registry.get_run(record.run_id)

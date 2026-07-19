@@ -1,6 +1,6 @@
 """Synthetic generation efficiency tests."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from ptk.config.schema import DataSource, PTKConfig, SyntheticConfig, TrainingMethod
 from ptk.data.generation import generate_synthetic_data

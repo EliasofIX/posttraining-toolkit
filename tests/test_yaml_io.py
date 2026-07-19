@@ -27,6 +27,13 @@ def test_yaml_round_trip():
     assert reloaded == original
 
 
+def test_yaml_empty_list_round_trip():
+    dumped = dump_yaml({"eval": {"benchmarks": [], "eval_steps": 100}})
+    assert "benchmarks: []" in dumped
+    reloaded = load_yaml(dumped)
+    assert reloaded["eval"]["benchmarks"] == []
+
+
 def test_load_config_rejects_invalid_yaml(tmp_path):
     path = tmp_path / "bad.yaml"
     path.write_text("run_name: test\nbad indent\n  x: 1", encoding="utf-8")

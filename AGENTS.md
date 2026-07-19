@@ -61,10 +61,16 @@ Every config MUST include:
 
 ```bash
 ptk init --method lora --output /tmp/lora.yaml --base-model distilgpt2
-ptk validate /tmp/lora.yaml --json
+# Path check is on by default; skip until data exists
+ptk validate /tmp/lora.yaml --json --skip-path-check
+ptk plan /tmp/lora.yaml --json --skip-path-check
+# Example configs resolve data paths relative to the config file:
+ptk validate configs/examples/lora.yaml --json
 ```
 
-Prefer `ptk init` + surgical edits over writing YAML from memory.
+Prefer `ptk init` + surgical edits over writing YAML from memory. Sample datasets live in `data/` (examples use `../../data/...`).
+
+Scaffold paths like `./data/train.jsonl` are resolved next to the **config file** (e.g. `ptk init -o subdir/config.yaml` expects `subdir/data/train.jsonl`), not the process cwd.
 
 ### 2.4 Safe Defaults for CI / Smoke Tests
 
@@ -74,11 +80,13 @@ When testing pipeline health, use tiny models and limits:
 base_model: distilgpt2
 training:
   max_iters: 2
-  batch_size: 1
+  batch_size: 1   # GRPO: see §5.6 — must be compatible with num_generations
   max_seq_length: 64
 compute:
   device: cpu
 ```
+
+For GRPO smoke tests use `batch_size: 2` with `num_generations: 2` (not `batch_size: 1`).
 
 ---
 
@@ -194,20 +202,28 @@ DeepSpeed is CUDA-only. Set `compute.deepspeed_config` to override auto-generati
 ### 5.4 Missing Dataset
 
 ```
-VALIDATION_ERROR: data.dataset.path not found
+VALIDATION_ERROR: Dataset path not found: ...
 ```
 
-Generate fixture data or switch to `data.source: synthetic`.
+- **When:** `ptk validate` / `ptk plan` / `ptk run` (path check on by default)
+- **Skip:** `--skip-path-check` on validate/plan/`data gen`; `ptk run --dry-run` skips (non-dry-run ignores `--skip-path-check`)
+- **Resolution:** relative paths resolve **only** against the config file's directory. Relative paths without `config_dir` fail closed (no cwd fallback). Registry keeps relative paths + `config_dir` for resume.
+- **Fix:** Place data relative to the config (or use `data/` / `tests/fixtures/data/`), generate fixtures, or set `data.source: synthetic`
 
 ### 5.5 PPO Failures
 
-- `reward_model` must share the policy tokenizer vocabulary (same tokenizer IDs). If you configure a different `reward_model`, the toolkit falls back to the `base_model` backbone with a warning.
-- Keep `max_iters` low for smoke tests (PPO is slow).
-- TRL 1.x uses `trl.experimental.ppo`; ensure `TRL_EXPERIMENTAL_SILENCE=1` is set (handled automatically by `ptk`).
+- PPO always tokenizes the train set to `input_ids` before TRL `PPOTrainer`.
+- Policy / reward / value load as **separate** backbones (3× memory vs SFT).
+- Reward **score head is randomly initialized** — fine for smoke tests, not a trained RM. Use a real reward model for meaningful RL.
+- `reward_model` must share the policy tokenizer; otherwise toolkit falls back to `base_model` with a warning.
+- Keep `max_iters` low for smoke tests.
+- TRL 1.x uses `trl.experimental.ppo`; `TRL_EXPERIMENTAL_SILENCE=1` is set automatically.
 
 ### 5.6 GRPO batch sizing
 
-- `training.batch_size` × `training.rl.num_generations` must satisfy TRL constraints: `generation_batch_size` divisible by `num_generations`, and `num_generations >= 2`.
+- `num_generations >= 2` always.
+- Single-process (`auto` / `single_gpu`): `batch_size * gradient_accumulation_steps` must be divisible by `num_generations` (schema-enforced).
+- `multi_gpu` / `multi_node`: schema skips the batch check; TRL validates `batch * world_size * steps_per_generation` at runtime.
 - Example smoke config: `batch_size: 2`, `num_generations: 2`.
 
 ### 5.7 Hub Push Failures
@@ -290,7 +306,7 @@ Update AGENTS.md when you:
 - Session-specific paths (`/tmp/my-run-47`)
 - Secrets or API keys
 - Prose duplicates of `ptk schema --json`
-- Milestone/staging plans (this project ships complete)
+- Milestone/staging plans (prefer concrete CI/runtime facts over roadmap prose)
 
 ### 8.4 Validation After Update
 
@@ -308,6 +324,10 @@ ptk validate tests/fixtures/sft.yaml --json
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-07-19 | Fail closed on relative dataset paths without config_dir; shared config_from_record for resume/eval/export | agent |
+| 2026-07-19 | Path resolve: config-dir only (no cwd bind), keep relative paths in registry + config_dir, reject directory datasets, dry-run-only path skip on run | agent |
+| 2026-07-19 | Review follow-ups: YAML empty-list dump, config-relative dataset paths, GRPO multi-GPU schema exemption, PPO reward-head warning, plan/run --skip-path-check | agent |
+| 2026-07-19 | CI/training hardening: PPO always-tokenize + separate backbones, DPO use_cpu, GRPO schema batch rules, validate path check, sample data/, method e2e fixtures, dep floors | agent |
 | 2026-07-05 | Efficiency overhaul: Parquet cache, rank-0 gating, hardware defaults, DPO fp16, lazy PPO tokenization, DeepSpeed wiring, batched eval | agent |
 | 2026-07-03 | Pipeline optimizations: eval skip fix, data cache, DPO memory, distributed launch, dataloader knobs | agent |
 | 2026-07-01 | GGUF native GPT-2 converter, PPO/GRPO e2e tests, GitHub Actions CI | bootstrap |

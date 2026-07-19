@@ -5,7 +5,7 @@ method: grpo
 data:
   source: dataset
   dataset:
-    path: ./data/train.jsonl
+    path: ../../data/train.jsonl
     format: jsonl
     text_column: text
 
@@ -13,7 +13,7 @@ training:
   epochs: 1
   max_iters: 3
   learning_rate: 5.0e-6
-  batch_size: 1
+  batch_size: 2
   logging_steps: 1
   save_steps: 3
   rl:

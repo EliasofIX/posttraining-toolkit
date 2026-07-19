@@ -1,6 +1,6 @@
-run_name: test-sft
+run_name: test-lora
 base_model: distilgpt2
-method: sft
+method: lora
 
 data:
   source: dataset
@@ -12,22 +12,23 @@ data:
 training:
   epochs: 1
   max_iters: 2
-  learning_rate: 5.0e-5
+  learning_rate: 2.0e-4
   batch_size: 1
   max_seq_length: 64
   logging_steps: 1
   save_steps: 2
-  gradient_accumulation_steps: 1
+  lora:
+    r: 8
+    alpha: 16
+    dropout: 0.05
+    target_modules:
+      - c_attn
+      - c_proj
 
 compute:
   device: cpu
   strategy: single_gpu
   mixed_precision: fp32
-
-eval:
-  benchmarks:
-    - perplexity
-  max_samples: 2
 
 output:
   dir: ./test_outputs

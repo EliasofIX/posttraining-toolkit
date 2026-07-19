@@ -15,8 +15,14 @@ from trl import SFTTrainer as TRLSFTTrainer
 from ptk.config.schema import DeviceType, QuantBackend
 from ptk.data.hf_adapter import to_hf_dataset_dict
 from ptk.data.table import TableDict
-from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
-from ptk.training.base_trainer import BaseTrainer, TrainerResult, is_distributed, prepare_tokenizer, resolve_resume_checkpoint
+from ptk.distributed.detect import torch_device_string
+from ptk.training.base_trainer import (
+    BaseTrainer,
+    TrainerResult,
+    is_distributed,
+    prepare_tokenizer,
+    resolve_resume_checkpoint,
+)
 
 
 def resolve_quantization_backend(device: DeviceType, requested: QuantBackend) -> str:

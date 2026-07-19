@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 
 class TrainingMethod(str, Enum):
@@ -157,7 +157,6 @@ class TrainingConfig(BaseModel):
     dataloader_prefetch_factor: int | None = Field(default=None, ge=1)
     dataloader_persistent_workers: bool | None = None
     dataset_num_proc: int | None = Field(default=None, ge=1)
-    pretokenize_dataset: bool = False
     gradient_checkpointing: bool = False
     lora: LoRAConfig | None = None
     quantization: QuantizationConfig | None = None
@@ -200,6 +199,17 @@ class PTKConfig(BaseModel):
     eval: EvalConfig = Field(default_factory=EvalConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
 
+    # Directory of the source config file; used to resolve relative dataset paths.
+    # Not serialized (keeps registry / dumps portable with relative paths).
+    _config_dir: Path | None = PrivateAttr(default=None)
+
+    @property
+    def config_dir(self) -> Path | None:
+        return self._config_dir
+
+    def set_config_dir(self, path: Path | None) -> None:
+        self._config_dir = path.resolve() if path is not None else None
+
     @field_validator("run_name")
     @classmethod
     def sanitize_run_name(cls, v: str) -> str:
@@ -221,6 +231,30 @@ class PTKConfig(BaseModel):
                 self.training.rl = RLConfig()
         if method == TrainingMethod.PPO and not self.training.rl.reward_model:
             raise ValueError("training.rl.reward_model is required for PPO")
+        if method == TrainingMethod.GRPO:
+            assert self.training.rl is not None
+            num_generations = self.training.rl.num_generations
+            if num_generations < 2:
+                raise ValueError("training.rl.num_generations must be >= 2 for GRPO")
+            # TRL uses per_device_batch * world_size * steps_per_generation.
+            # Without a known world_size, enforce the single-process case only.
+            # Multi-GPU / multi-node configs are checked at runtime by TRL.
+            if self.compute.strategy not in (
+                ComputeStrategy.MULTI_GPU,
+                ComputeStrategy.MULTI_NODE,
+            ):
+                generation_batch_size = (
+                    self.training.batch_size * self.training.gradient_accumulation_steps
+                )
+                if generation_batch_size % num_generations != 0:
+                    raise ValueError(
+                        "For GRPO on a single process, training.batch_size * "
+                        "training.gradient_accumulation_steps "
+                        f"({generation_batch_size}) must be divisible by "
+                        f"training.rl.num_generations ({num_generations}). "
+                        "For multi-GPU, set compute.strategy to multi_gpu "
+                        "(TRL validates world_size * batch at runtime)."
+                    )
         return self
 
     def output_path(self) -> Path:

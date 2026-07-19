@@ -34,7 +34,7 @@ from ptk.eval.harness import EvalHarness
 from ptk.export.formats import export_run
 from ptk.logging import Logger
 from ptk.registry.runs import RunRegistry, RunStatus
-from ptk.training.base_trainer import get_trainer, resolve_resume_checkpoint
+from ptk.training.base_trainer import get_trainer
 
 
 def plan_run(config: PTKConfig) -> dict[str, Any]:
@@ -55,7 +55,7 @@ def plan_run(config: PTKConfig) -> dict[str, Any]:
         try:
             from ptk.data.loaders import count_dataset_samples
 
-            n_samples = count_dataset_samples(config.data.dataset)
+            n_samples = count_dataset_samples(config.data.dataset, base_dir=config.config_dir)
         except Exception:
             n_samples = 0
 
@@ -161,7 +161,11 @@ def _launch_distributed(
         generate_accelerate_config(env, accel_cfg, deepspeed_config=deepspeed_path)
 
     config_path = output_dir / "pipeline_config.yaml"
-    config_path.write_text(config_to_yaml(config), encoding="utf-8")
+    # Child accelerate processes load this file from the output dir; write
+    # absolutized dataset paths so relative paths still resolve correctly.
+    from ptk.config.loader import with_resolved_dataset_paths
+
+    config_path.write_text(config_to_yaml(with_resolved_dataset_paths(config)), encoding="utf-8")
 
     cmd = [
         "accelerate",
@@ -352,6 +356,7 @@ def _prepare_data(
         config.data,
         config.method,
         num_proc=config.training.dataset_num_proc,
+        base_dir=config.config_dir,
     )
     stats = dataset_stats(dataset_dict)
     logger.complete("Dataset ready", **stats)

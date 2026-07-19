@@ -72,6 +72,37 @@ def test_cli_init(tmp_path):
     assert out.exists()
 
 
+def test_cli_init_then_validate_skip_path_check(tmp_path):
+    out = tmp_path / "config.yaml"
+    code, _ = invoke(["init", "--method", "lora", "--output", str(out)])
+    assert code == 0
+    code, output = invoke(["validate", str(out), "--json", "--skip-path-check"])
+    assert code == 0, output
+    assert '"valid": true' in output.replace(" ", "") or '"valid": true' in output
+
+
+def test_cli_validate_skip_path_check(tmp_path):
+    cfg = tmp_path / "missing.yaml"
+    cfg.write_text(
+        """
+run_name: missing-data
+base_model: distilgpt2
+method: sft
+data:
+  source: dataset
+  dataset:
+    path: /nonexistent/train.jsonl
+    format: jsonl
+""",
+        encoding="utf-8",
+    )
+    code, _ = invoke(["validate", str(cfg), "--json"])
+    assert code == 1
+    code, output = invoke(["validate", str(cfg), "--json", "--skip-path-check"])
+    assert code == 0
+    assert "valid" in output
+
+
 def test_cli_list():
     code, output = invoke(["list", "--json"])
     assert code == 0

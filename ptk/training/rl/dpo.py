@@ -9,7 +9,7 @@ from trl import DPOConfig, DPOTrainer
 
 from ptk.data.hf_adapter import to_hf_dataset_dict
 from ptk.data.table import TableDict
-from ptk.distributed.detect import resolve_mixed_precision
+from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
 from ptk.training.base_trainer import (
     BaseTrainer,
     TrainerResult,
@@ -38,6 +38,7 @@ class DPOTrainerWrapper(BaseTrainer):
 
         t = self.config.training
         precision = resolve_mixed_precision(self.env.device, self.config.compute.mixed_precision)
+        device = torch_device_string(self.env.device)
         dpo_config = DPOConfig(
             output_dir=str(self.output_dir),
             num_train_epochs=t.epochs,
@@ -54,6 +55,7 @@ class DPOTrainerWrapper(BaseTrainer):
             gradient_checkpointing=t.gradient_checkpointing,
             fp16=precision == "fp16",
             bf16=precision == "bf16",
+            use_cpu=device == "cpu",
             precompute_ref_log_probs=rl.precompute_ref_log_probs,
             **dataloader_kwargs(t),
             **deepspeed_kwargs(self.config),

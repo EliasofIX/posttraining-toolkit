@@ -44,6 +44,8 @@ class RunRecord:
     global_step: int = 0
     metrics: dict[str, float] = field(default_factory=dict)
     error: str | None = None
+    # Directory of the source config file; restores relative dataset path resolution on resume.
+    config_dir: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -54,7 +56,16 @@ class RunRecord:
     def from_dict(cls, data: dict[str, Any]) -> RunRecord:
         data = dict(data)
         data["status"] = RunStatus(data["status"])
+        data.setdefault("config_dir", None)
         return cls(**data)
+
+
+def config_from_record(record: RunRecord) -> PTKConfig:
+    """Rebuild a PTKConfig from a registry record, restoring config_dir for path resolution."""
+    config = PTKConfig.model_validate(record.config)
+    if record.config_dir is not None:
+        config.set_config_dir(Path(record.config_dir))
+    return config
 
 
 class RunRegistry:
@@ -75,6 +86,7 @@ class RunRegistry:
             created_at=now,
             updated_at=now,
             git_commit=_git_commit(),
+            config_dir=str(config.config_dir) if config.config_dir is not None else None,
         )
         self.store.write(run_id, record.to_dict())
         return record
@@ -111,7 +123,7 @@ class RunRegistry:
         if record is None:
             return None
 
-        config = PTKConfig.model_validate(record.config)
+        config = config_from_record(record)
         checkpoint_root = config.output_path() / "checkpoints"
         if checkpoint_root.exists():
             numbered = sorted(

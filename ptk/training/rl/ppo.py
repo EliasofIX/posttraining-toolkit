@@ -14,8 +14,8 @@ from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
 from ptk.training.base_trainer import (
     BaseTrainer,
     TrainerResult,
-    dataset_map_kwargs,
     dataloader_kwargs,
+    dataset_map_kwargs,
     deepspeed_kwargs,
     is_distributed,
     prepare_tokenizer,
@@ -32,7 +32,7 @@ from trl.experimental.ppo import (  # noqa: E402
 
 
 class _PPORewardModel(nn.Module):
-    """GPT-2 compatible reward model sharing the policy backbone."""
+    """GPT-2 compatible reward model sharing the policy tokenizer vocabulary."""
 
     base_model_prefix = "transformer"
 
@@ -83,17 +83,30 @@ class PPOTrainerWrapper(BaseTrainer):
 
         tokenizer = prepare_tokenizer(self.config.base_model)
 
-        if rl.reward_model != self.config.base_model:
+        reward_source = rl.reward_model
+        if reward_source != self.config.base_model:
             self.logger.warn(
                 "PPO reward model must share the policy tokenizer; using base_model for reward scoring",
-                configured=rl.reward_model,
+                configured=reward_source,
                 using=self.config.base_model,
             )
+            reward_source = self.config.base_model
 
-        backbone = AutoModelForCausalLM.from_pretrained(self.config.base_model, trust_remote_code=True)
-        policy = backbone
-        reward_model = _PPORewardModel(backbone)
-        value_wrapped = AutoModelForCausalLMWithValueHead(backbone)
+        # Separate backbones so policy / reward / value do not share parameters.
+        # Note: three full model loads — expect higher RAM than SFT/LoRA smoke runs.
+        self.logger.warn(
+            "PPO loads three model copies (policy, reward, value); watch memory on small hosts",
+            base_model=self.config.base_model,
+        )
+        policy = AutoModelForCausalLM.from_pretrained(self.config.base_model, trust_remote_code=True)
+        reward_backbone = AutoModelForCausalLM.from_pretrained(reward_source, trust_remote_code=True)
+        value_backbone = AutoModelForCausalLM.from_pretrained(self.config.base_model, trust_remote_code=True)
+        reward_model = _PPORewardModel(reward_backbone)
+        self.logger.warn(
+            "PPO reward score head is randomly initialized; use a trained reward model for real RL",
+            reward_source=reward_source,
+        )
+        value_wrapped = AutoModelForCausalLMWithValueHead(value_backbone)
         value_model = _PPOValueModel(value_wrapped)
 
         if not distributed and device != "cpu":
@@ -105,13 +118,12 @@ class PPOTrainerWrapper(BaseTrainer):
         def tokenize(example):
             return tokenizer(example["text"], truncation=True, max_length=t.max_seq_length)
 
-        train_ds = hf_data["train"]
-        if t.pretokenize_dataset:
-            train_ds = train_ds.map(
-                tokenize,
-                remove_columns=hf_data["train"].column_names,
-                **dataset_map_kwargs(t),
-            )
+        # TRL PPOTrainer requires input_ids; always pretokenizeize.
+        train_ds = hf_data["train"].map(
+            tokenize,
+            remove_columns=hf_data["train"].column_names,
+            **dataset_map_kwargs(t),
+        )
 
         max_steps = t.max_iters or 2
         batch_size = max(1, t.batch_size * t.gradient_accumulation_steps)

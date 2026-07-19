@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from ptk.config.loader import load_config
-from ptk.config.schema import ExportFormat, PTKConfig, TrainingMethod
+from ptk.config.schema import PTKConfig, TrainingMethod
 from ptk.data.loaders import count_dataset_samples
 from ptk.data.pipeline import load_processed_cache, save_processed_cache
 from ptk.data.table import Table, TableDict

@@ -62,10 +62,12 @@ jobs:
       - name: Install package
         run: pip install -e ".[dev,gguf]"
 
-      - name: Integration tests (SFT, PPO, GRPO, GGUF export)
+      - name: Integration tests (all methods + GGUF export)
         run: pytest tests/test_integration.py tests/test_gguf_export.py -v -m slow --tb=short
         env:
           HF_HUB_DISABLE_TELEMETRY: "1"
+        # QLoRA e2e on CPU covers the non-quantized fallback path only.
+        # Real bitsandbytes QLoRA requires a CUDA runner with extras [cuda].
 
   # Apple Silicon MPS parity — runs on macOS arm64 when available
   mps-smoke:
