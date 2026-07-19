@@ -127,6 +127,10 @@ class QuantizationConfig(BaseModel):
     quant_type: QuantType = QuantType.NF4
     backend: QuantBackend = QuantBackend.AUTO
     double_quant: bool = True
+    # MLX group quantization size (ignored by bitsandbytes).
+    group_size: int = Field(default=64, ge=1)
+    # When True on MPS without MLX, allow fp16 PEFT LoRA instead of failing closed.
+    allow_unquantized_fallback: bool = False
 
 
 class RLConfig(BaseModel):

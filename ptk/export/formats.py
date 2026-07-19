@@ -37,21 +37,55 @@ def export_run(
 
     artifacts: dict[str, str] = {}
 
+    from ptk.mlx.trainer import is_mlx_checkpoint
+
+    mlx_ckpt = is_mlx_checkpoint(ckpt)
+
     for fmt in export_formats:
         log.start(f"Exporting {fmt.value}")
         if fmt == ExportFormat.ADAPTER_ONLY:
-            artifacts["adapter_only"] = _export_adapter_only(ckpt, export_dir / "adapter")
+            if mlx_ckpt:
+                from ptk.mlx.export import export_mlx_adapter_only
+
+                artifacts["adapter_only"] = export_mlx_adapter_only(ckpt, export_dir / "adapter")
+            else:
+                artifacts["adapter_only"] = _export_adapter_only(ckpt, export_dir / "adapter")
         elif fmt == ExportFormat.MERGED_FP16:
-            artifacts["merged_fp16"] = _export_merged_fp16(
-                config,
-                ckpt,
-                export_dir / "merged_fp16",
-                export_dir=export_dir,
-                model=model,
-                tokenizer=tokenizer,
-            )
+            if mlx_ckpt:
+                from ptk.mlx.export import export_mlx_merged
+
+                artifacts["merged_fp16"] = export_mlx_merged(
+                    config, ckpt, export_dir / "merged_fp16", logger=log
+                )
+            else:
+                artifacts["merged_fp16"] = _export_merged_fp16(
+                    config,
+                    ckpt,
+                    export_dir / "merged_fp16",
+                    export_dir=export_dir,
+                    model=model,
+                    tokenizer=tokenizer,
+                )
         elif fmt == ExportFormat.GGUF:
-            artifacts["gguf"] = _export_gguf(config, ckpt, export_dir / "model.gguf", export_dir)
+            if mlx_ckpt:
+                # Fuse first, then attempt existing GGUF path on fused dir if HF-compatible.
+                from ptk.mlx.export import export_mlx_merged
+
+                fused = Path(
+                    export_mlx_merged(config, ckpt, export_dir / "merged_for_gguf", logger=log)
+                )
+                try:
+                    artifacts["gguf"] = _export_gguf(config, fused, export_dir / "model.gguf", export_dir)
+                except Exception as exc:
+                    from ptk.exceptions import RuntimeError as PTKRuntimeError
+
+                    raise PTKRuntimeError(
+                        f"GGUF export from MLX fused model failed: {exc}. "
+                        "MLX GGUF support is model-family limited; use adapter_only or merged_fp16.",
+                        code="GGUF_CONVERT_FAILED",
+                    ) from exc
+            else:
+                artifacts["gguf"] = _export_gguf(config, ckpt, export_dir / "model.gguf", export_dir)
         log.complete(f"Exported {fmt.value}", path=artifacts.get(fmt.value))
 
     if config.output.push_to_hub:

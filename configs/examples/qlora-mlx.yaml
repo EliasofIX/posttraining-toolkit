@@ -1,5 +1,9 @@
-run_name: qlora-distilgpt2
-base_model: distilgpt2
+# Apple Silicon QLoRA via MLX (true 4-bit).
+# Install: pip install -e ".[mlx]"
+# Swap base_model and data paths for your run.
+
+run_name: qlora-mlx-example
+base_model: Qwen/Qwen3-0.6B
 method: qlora
 
 data:
@@ -11,22 +15,21 @@ data:
 
 training:
   epochs: 1
-  max_iters: 5
+  max_iters: 20
   learning_rate: 2.0e-4
   batch_size: 1
-  max_seq_length: 128
-  logging_steps: 2
-  save_steps: 5
+  max_seq_length: 256
+  logging_steps: 5
+  save_steps: 20
+  gradient_checkpointing: true
   lora:
     r: 8
     alpha: 16
     dropout: 0.05
   quantization:
     bits: 4
-    quant_type: nf4
-    backend: auto  # CUDA→bnb, Apple Silicon→mlx_quant (pip install -e ".[mlx]")
-    double_quant: true
-    group_size: 64  # MLX only; ignored by bitsandbytes
+    backend: auto
+    group_size: 64
 
 compute:
   strategy: auto

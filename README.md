@@ -31,7 +31,7 @@ Example configs in `configs/examples/` point at `../../data/train.jsonl` and `..
 |--------|-------------|
 | `sft` | Supervised fine-tuning via TRL SFTTrainer |
 | `lora` | Low-rank adapter fine-tuning via PEFT |
-| `qlora` | Quantized LoRA (bitsandbytes on CUDA, MPS fallback on Apple Silicon) |
+| `qlora` | Quantized LoRA (bitsandbytes on CUDA, true 4-bit MLX on Apple Silicon) |
 | `dpo` | Direct Preference Optimization |
 | `ppo` | Proximal Policy Optimization with reward model |
 | `grpo` | Group Relative Policy Optimization |
@@ -100,20 +100,24 @@ Core runtime dependencies are limited to the Hugging Face training stack:
 The toolkit implements its own YAML config I/O, CLI (`argparse`), terminal logging, in-memory data tables, safetensors reader, and Hugging Face Hub client. Optional extras:
 
 - `cuda` — bitsandbytes + DeepSpeed
+- `mlx` — true 4-bit QLoRA on Apple Silicon via MLX / mlx-lm
 - `gguf` — GGUF export
 - `parquet` — Parquet dataset loading (`pyarrow`)
 
 ## Hardware Support
 
 - **NVIDIA CUDA** — full feature set including bitsandbytes QLoRA, DeepSpeed, multi-GPU/multi-node
-- **Apple Silicon (MPS)** — SFT, LoRA, QLoRA with MPS-safe quantization fallback
-- **CPU** — smoke tests and tiny-model development
+- **Apple Silicon** — SFT, LoRA, and **true 4-bit QLoRA via MLX** when the `mlx` extra is installed
+- **CPU** — smoke tests and tiny-model development (QLoRA runs unquantized LoRA)
 
-Install CUDA extras:
+Install extras:
 
 ```bash
-pip install -e ".[cuda]"
+pip install -e ".[cuda]"   # NVIDIA QLoRA + DeepSpeed
+pip install -e ".[mlx]"    # Apple Silicon true 4-bit QLoRA
 ```
+
+On Apple Silicon, `method: qlora` with `training.quantization.backend: auto` selects the MLX backend (quantize with `mlx_lm.convert`, train adapters with mlx-lm). Without `.[mlx]`, QLoRA on MPS fails closed with install instructions (set `allow_unquantized_fallback: true` only for legacy fp16 PEFT smoke tests). See `configs/examples/qlora-mlx.yaml`.
 
 ## Synthetic Data Generation
 

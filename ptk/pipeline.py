@@ -71,7 +71,8 @@ def plan_run(config: PTKConfig) -> dict[str, Any]:
     disk_mb = n_samples * 0.5 + 500
     preprocess_seconds = 0.0 if cache_hit else round(max(n_samples, 1) * 0.0001, 2)
 
-    return {
+    warnings = list(env.warnings)
+    plan: dict[str, Any] = {
         "run_name": config.run_name,
         "method": config.method.value,
         "device": env.device.value,
@@ -84,9 +85,38 @@ def plan_run(config: PTKConfig) -> dict[str, Any]:
         "estimated_disk_mb": round(disk_mb, 1),
         "estimated_preprocess_seconds": preprocess_seconds,
         "data_cache_hit": cache_hit,
-        "warnings": env.warnings,
+        "warnings": warnings,
         "output_dir": str(config.output_path()),
     }
+
+    if config.method.value == "qlora" and config.training.quantization is not None:
+        from ptk.mlx.availability import mlx_available
+        from ptk.mlx.model_cache import mlx_cache_key
+        from ptk.training.quant_backend import resolve_quantization_backend
+
+        try:
+            quant_backend = resolve_quantization_backend(env.device, config.training.quantization)
+        except Exception as exc:
+            quant_backend = "unresolved"
+            warnings.append(str(exc))
+
+        true_4bit = quant_backend in ("bnb", "mlx_quant")
+        plan["quant_backend"] = quant_backend
+        plan["true_4bit"] = true_4bit
+        plan["mlx_available"] = mlx_available()
+        if quant_backend == "mlx_quant":
+            key = mlx_cache_key(config.base_model, config.training.quantization)
+            mlx_cache = config.output_path() / "model_cache" / "mlx" / key
+            plan["mlx_model_cache_hit"] = (mlx_cache / ".ready").exists()
+            if n_samples and n_samples < t.batch_size:
+                warnings.append(
+                    f"MLX training requires at least batch_size={t.batch_size} samples "
+                    f"(data_samples={n_samples})"
+                )
+            # Extra disk for quantized MLX conversion cache
+            plan["estimated_disk_mb"] = round(float(plan["estimated_disk_mb"]) + 800, 1)
+
+    return plan
 
 
 def _is_distributed_active() -> bool:
@@ -273,6 +303,7 @@ def run_pipeline(
 
         if not skip_eval and config.eval.benchmarks and is_main_process():
             harness = EvalHarness(logger)
+            # MLX trainers leave model/tokenizer as None; always reload from checkpoint.
             if result.model is not None and result.tokenizer is not None:
                 eval_results = harness.run_with_model(config, result.model, result.tokenizer)
                 _save_eval_results(config, eval_results)

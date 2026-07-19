@@ -1,4 +1,4 @@
-"""QLoRA fine-tuning with CUDA bitsandbytes and MPS fallback."""
+"""QLoRA fine-tuning: bitsandbytes on CUDA, true MLX 4-bit on Apple Silicon."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 from trl import SFTConfig
 from trl import SFTTrainer as TRLSFTTrainer
 
-from ptk.config.schema import DeviceType, QuantBackend
+from ptk.config.schema import DeviceType
 from ptk.data.hf_adapter import to_hf_dataset_dict
 from ptk.data.table import TableDict
 from ptk.distributed.detect import torch_device_string
@@ -23,30 +23,46 @@ from ptk.training.base_trainer import (
     prepare_tokenizer,
     resolve_resume_checkpoint,
 )
-
-
-def resolve_quantization_backend(device: DeviceType, requested: QuantBackend) -> str:
-    """Select quantization backend based on device."""
-    if device == DeviceType.CUDA:
-        return "bnb"
-    if device == DeviceType.MPS:
-        if requested in (QuantBackend.MLX_QUANT, QuantBackend.AUTO):
-            return "mlx_quant"
-        return "mlx_quant"
-    return "none"
+from ptk.training.quant_backend import resolve_quantization_backend
 
 
 class QLoRATrainer(BaseTrainer):
-    """QLoRA with bitsandbytes on CUDA and MPS-compatible fallback."""
+    """QLoRA with bitsandbytes on CUDA and true MLX quantization on Apple Silicon."""
 
     def train(self, dataset: TableDict, *, resume_from: Path | None = None) -> TrainerResult:
-        hf_data = to_hf_dataset_dict(dataset)
         assert self.config.training.lora is not None
         assert self.config.training.quantization is not None
         quant = self.config.training.quantization
-        lora_cfg = self.config.training.lora
 
-        backend = resolve_quantization_backend(self.env.device, quant.backend)
+        backend = resolve_quantization_backend(self.env.device, quant)
+
+        if backend == "mlx_quant":
+            from ptk.mlx.trainer import train_qlora_mlx
+
+            result = train_qlora_mlx(
+                self.config,
+                dataset,
+                output_dir=self.output_dir,
+                logger=self.logger,
+                resume_from=resume_from,
+            )
+            self.save_training_metadata(result)
+            return result
+
+        return self._train_torch(dataset, backend=backend, resume_from=resume_from)
+
+    def _train_torch(
+        self,
+        dataset: TableDict,
+        *,
+        backend: str,
+        resume_from: Path | None,
+    ) -> TrainerResult:
+        hf_data = to_hf_dataset_dict(dataset)
+        quant = self.config.training.quantization
+        lora_cfg = self.config.training.lora
+        assert quant is not None and lora_cfg is not None
+
         self.logger.start("QLoRA training", model=self.config.base_model, quant_backend=backend)
 
         tokenizer = prepare_tokenizer(self.config.base_model)
@@ -61,19 +77,20 @@ class QLoRATrainer(BaseTrainer):
                 bnb_4bit_use_double_quant=quant.double_quant,
                 bnb_4bit_compute_dtype=torch.float16,
             )
-        elif backend == "mlx_quant":
-            warnings.warn(
-                "MPS detected: bitsandbytes has no MPS kernels. "
-                "Using reduced-precision LoRA (fp16) without bitsandbytes quantization. "
-                "Set training.quantization.backend=mlx_quant explicitly to suppress this warning.",
-                stacklevel=2,
-            )
-            model_kwargs["torch_dtype"] = torch.float16
         else:
-            warnings.warn(
-                "No compatible quantization backend; falling back to full-precision LoRA.",
-                stacklevel=2,
+            # none — unquantized LoRA (CPU smoke or explicit allow_unquantized_fallback)
+            msg = (
+                "QLoRA running without quantization (backend=none). "
+                "This is full-precision/fp LoRA, not true QLoRA."
             )
+            if self.env.device == DeviceType.MPS and quant.allow_unquantized_fallback:
+                msg = (
+                    "MPS QLoRA allow_unquantized_fallback=true: using fp16 PEFT LoRA "
+                    "without MLX 4-bit quantization."
+                )
+            warnings.warn(msg, stacklevel=2)
+            if self.env.device == DeviceType.MPS:
+                model_kwargs["torch_dtype"] = torch.float16
 
         model = AutoModelForCausalLM.from_pretrained(self.config.base_model, **model_kwargs)
         if backend == "bnb":
@@ -121,5 +138,5 @@ class QLoRATrainer(BaseTrainer):
             tokenizer=tokenizer,
         )
         self.save_training_metadata(result)
-        self.logger.complete("QLoRA training complete", step=result.global_step)
+        self.logger.complete("QLoRA training complete", step=result.global_step, quant_backend=backend)
         return result

@@ -186,8 +186,10 @@ pip install -e ".[gguf]"
 ### 5.2 MPS / Apple Silicon
 
 - `compute.strategy: multi_gpu` or `multi_node` → **validation error**. Use `auto` or `single_gpu`.
-- QLoRA: bitsandbytes unavailable → toolkit falls back to fp16 LoRA with warning. This is expected.
-- If NaN losses: set `compute.mixed_precision: fp32`.
+- **QLoRA true 4-bit:** install `pip install -e ".[mlx]"`. Backend `auto` → `mlx_quant` (convert + mlx-lm LoRA). Not bitsandbytes.
+- Missing MLX extras on MPS → **validation/runtime error** with install hint (fail closed). Opt-in legacy path: `training.quantization.allow_unquantized_fallback: true` (fp16 PEFT, not true QLoRA).
+- MLX ignores `quant_type` / `double_quant`; uses `bits` + `group_size` (default 64).
+- If NaN losses on torch/MPS LoRA paths: set `compute.mixed_precision: fp32`.
 
 ### 5.3 CUDA / Multi-GPU
 
@@ -253,8 +255,9 @@ Non-fatal. Check `HF_TOKEN` env var. Export artifacts locally via `ptk export`.
 |-----------------|--------------------------|---------------|-------------|
 | CUDA + 1 GPU | `single_gpu` | `bnb` | accelerate |
 | CUDA + N GPUs | `multi_gpu` | `bnb` | accelerate |
-| MPS | `single_gpu` | `mlx_quant` (fp16 fallback) | single device only |
-| CPU | `single_gpu` | none (full precision) | none |
+| MPS + `.[mlx]` | `single_gpu` | `mlx_quant` (true 4-bit) | single device only |
+| MPS without MLX | `single_gpu` | error (or unquantized if `allow_unquantized_fallback`) | single device only |
+| CPU | `single_gpu` | none (full precision LoRA) | none |
 
 Always verify with `ptk plan --json` before committing GPU hours.
 
@@ -324,6 +327,7 @@ ptk validate tests/fixtures/sft.yaml --json
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-07-19 | True MLX 4-bit QLoRA on Apple Silicon (`.[mlx]`); fail closed without MLX; plan quant_backend fields | agent |
 | 2026-07-19 | Fail closed on relative dataset paths without config_dir; shared config_from_record for resume/eval/export | agent |
 | 2026-07-19 | Path resolve: config-dir only (no cwd bind), keep relative paths in registry + config_dir, reject directory datasets, dry-run-only path skip on run | agent |
 | 2026-07-19 | Review follow-ups: YAML empty-list dump, config-relative dataset paths, GRPO multi-GPU schema exemption, PPO reward-head warning, plan/run --skip-path-check | agent |

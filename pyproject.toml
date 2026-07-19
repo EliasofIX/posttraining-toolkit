@@ -37,6 +37,10 @@ cuda = [
     "bitsandbytes>=0.43.0",
     "deepspeed>=0.14.0",
 ]
+mlx = [
+    "mlx>=0.22.0",
+    "mlx-lm>=0.22.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=5.0.0",

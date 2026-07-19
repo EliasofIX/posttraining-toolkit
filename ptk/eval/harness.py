@@ -56,9 +56,23 @@ class EvalHarness:
         env = detect_environment(device=config.compute.device, strategy=config.compute.strategy)
         device = torch_device_string(env.device)
 
-        model_path = str(checkpoint_path or config.output_path() / "checkpoints" / "final")
-        if not Path(model_path).exists():
-            model_path = config.base_model
+        ckpt = Path(checkpoint_path or config.output_path() / "checkpoints" / "final")
+        from ptk.mlx.trainer import is_mlx_checkpoint
+
+        if is_mlx_checkpoint(ckpt):
+            from ptk.mlx.eval import run_mlx_eval
+
+            max_samples = config.eval.max_samples
+            eval_texts = self._load_eval_texts(config, max_samples or 32)
+            return run_mlx_eval(
+                config,
+                ckpt,
+                benchmarks=bench_list,
+                logger=self.logger,
+                eval_texts=eval_texts,
+            )
+
+        model_path = str(ckpt) if ckpt.exists() else config.base_model
 
         self.logger.start("Evaluation", benchmarks=bench_list, model=model_path)
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
