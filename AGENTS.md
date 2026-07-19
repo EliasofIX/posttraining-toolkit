@@ -204,9 +204,9 @@ VALIDATION_ERROR: Dataset path not found: ...
 ```
 
 - **When:** `ptk validate` / `ptk plan` / `ptk run` (path check on by default)
-- **Skip:** `--skip-path-check` on validate/plan/run; `--dry-run` implies skip for run
-- **Resolution:** relative paths try config-file directory first, then cwd
-- **Fix:** Place data next to the config (or use `data/` / `tests/fixtures/data/`), generate fixtures, or set `data.source: synthetic`
+- **Skip:** `--skip-path-check` on validate/plan/`data gen`; `ptk run --dry-run` skips (non-dry-run ignores `--skip-path-check`)
+- **Resolution:** relative paths resolve **only** against the config file's directory (never cwd). Registry keeps relative paths + `config_dir` for resume.
+- **Fix:** Place data relative to the config (or use `data/` / `tests/fixtures/data/`), generate fixtures, or set `data.source: synthetic`
 
 ### 5.5 PPO Failures
 
@@ -322,6 +322,7 @@ ptk validate tests/fixtures/sft.yaml --json
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-07-19 | Path resolve: config-dir only (no cwd bind), keep relative paths in registry + config_dir, reject directory datasets, dry-run-only path skip on run | agent |
 | 2026-07-19 | Review follow-ups: YAML empty-list dump, config-relative dataset paths, GRPO multi-GPU schema exemption, PPO reward-head warning, plan/run --skip-path-check | agent |
 | 2026-07-19 | CI/training hardening: PPO always-tokenize + separate backbones, DPO use_cpu, GRPO schema batch rules, validate path check, sample data/, method e2e fixtures, dep floors | agent |
 | 2026-07-05 | Efficiency overhaul: Parquet cache, rank-0 gating, hardware defaults, DPO fp16, lazy PPO tokenization, DeepSpeed wiring, batched eval | agent |

@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 
 class TrainingMethod(str, Enum):
@@ -198,6 +198,17 @@ class PTKConfig(BaseModel):
     compute: ComputeConfig = Field(default_factory=ComputeConfig)
     eval: EvalConfig = Field(default_factory=EvalConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
+
+    # Directory of the source config file; used to resolve relative dataset paths.
+    # Not serialized (keeps registry / dumps portable with relative paths).
+    _config_dir: Path | None = PrivateAttr(default=None)
+
+    @property
+    def config_dir(self) -> Path | None:
+        return self._config_dir
+
+    def set_config_dir(self, path: Path | None) -> None:
+        self._config_dir = path.resolve() if path is not None else None
 
     @field_validator("run_name")
     @classmethod

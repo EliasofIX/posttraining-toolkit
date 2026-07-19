@@ -168,6 +168,8 @@ data:
 
 
 def test_load_config_resolves_path_relative_to_config_dir(tmp_path):
+    from ptk.config.loader import resolve_dataset_path
+
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     data_file = data_dir / "train.jsonl"
@@ -187,12 +189,81 @@ data:
         encoding="utf-8",
     )
     config = load_config(cfg)
-    assert Path(config.data.dataset.path).is_absolute()
-    assert Path(config.data.dataset.path).exists()
+    # Path stays relative for portable dumps; config_dir enables resolution.
+    assert config.data.dataset.path == "data/train.jsonl"
+    assert config.config_dir == tmp_path.resolve()
+    assert resolve_dataset_path(config.data.dataset.path, config_dir=config.config_dir) == data_file.resolve()
+
+
+def test_load_config_does_not_bind_cwd_dataset(tmp_path, monkeypatch):
+    """Missing config-dir data must not silently use an unrelated cwd dataset."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "data").mkdir()
+    (cwd / "data" / "train.jsonl").write_text('{"text": "cwd"}\n', encoding="utf-8")
+
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    cfg = cfg_dir / "run.yaml"
+    cfg.write_text(
+        """
+run_name: no-cwd-bind
+base_model: distilgpt2
+method: sft
+data:
+  source: dataset
+  dataset:
+    path: data/train.jsonl
+    format: jsonl
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(cwd)
+    with pytest.raises(ValidationError, match="Dataset path not found"):
+        load_config(cfg)
+
+
+def test_load_config_rejects_directory_dataset_path(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    cfg = tmp_path / "run.yaml"
+    cfg.write_text(
+        f"""
+run_name: dir-path
+base_model: distilgpt2
+method: sft
+data:
+  source: dataset
+  dataset:
+    path: {data_dir.name}
+    format: jsonl
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError, match="directory"):
+        load_config(cfg)
+
+
+def test_registry_keeps_relative_dataset_path(tmp_path):
+    from ptk.registry.runs import RunRegistry
+    from ptk.registry.store import LocalStore
+
+    cfg = FIXTURES / "sft.yaml"
+    config = load_config(cfg)
+    assert not Path(config.data.dataset.path).is_absolute()
+
+    store = LocalStore(tmp_path / "registry")
+    registry = RunRegistry(store=store)
+    record = registry.create_run(config)
+    assert not Path(record.config["data"]["dataset"]["path"]).is_absolute()
+    assert record.config_dir == str(cfg.parent.resolve())
 
 
 def test_load_all_method_fixtures():
+    from ptk.config.loader import resolve_dataset_path
+
     for name in ("sft.yaml", "lora.yaml", "qlora.yaml", "dpo.yaml", "ppo.yaml", "grpo.yaml"):
         config = load_config(FIXTURES / name)
         assert config.method.value in name
-        assert Path(config.data.dataset.path).exists()
+        resolved = resolve_dataset_path(config.data.dataset.path, config_dir=config.config_dir)
+        assert resolved.exists()

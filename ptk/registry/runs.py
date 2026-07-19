@@ -44,6 +44,8 @@ class RunRecord:
     global_step: int = 0
     metrics: dict[str, float] = field(default_factory=dict)
     error: str | None = None
+    # Directory of the source config file; restores relative dataset path resolution on resume.
+    config_dir: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -54,6 +56,7 @@ class RunRecord:
     def from_dict(cls, data: dict[str, Any]) -> RunRecord:
         data = dict(data)
         data["status"] = RunStatus(data["status"])
+        data.setdefault("config_dir", None)
         return cls(**data)
 
 
@@ -75,6 +78,7 @@ class RunRegistry:
             created_at=now,
             updated_at=now,
             git_commit=_git_commit(),
+            config_dir=str(config.config_dir) if config.config_dir is not None else None,
         )
         self.store.write(run_id, record.to_dict())
         return record

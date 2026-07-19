@@ -27,7 +27,7 @@ from ptk.exceptions import (
 from ptk.export.formats import export_run
 from ptk.logging import Logger
 from ptk.pipeline import plan_run, run_pipeline
-from ptk.registry.runs import RunRegistry
+from ptk.registry.runs import RunRecord, RunRegistry
 
 
 class CLIExit(SystemExit):
@@ -59,8 +59,15 @@ def _handle_error(exc: Exception, logger: Logger, as_json: bool) -> None:
     raise CLIExit(EXIT_RUNTIME) from exc
 
 
-def load_config_from_dict(data: dict) -> PTKConfig:
-    return PTKConfig.model_validate(data)
+def load_config_from_dict(data: dict, *, config_dir: str | Path | None = None) -> PTKConfig:
+    config = PTKConfig.model_validate(data)
+    if config_dir is not None:
+        config.set_config_dir(Path(config_dir))
+    return config
+
+
+def _config_from_record(record: RunRecord) -> PTKConfig:
+    return load_config_from_dict(record.config, config_dir=record.config_dir)
 
 
 def _add_common_flags(parser: argparse.ArgumentParser) -> None:
@@ -116,7 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--skip-path-check",
         action="store_true",
-        help="Skip local dataset path existence check (implied by --dry-run)",
+        help="Ignored unless --dry-run (real runs always require a dataset path)",
     )
     _add_common_flags(run_parser)
 
@@ -130,6 +137,11 @@ def build_parser() -> argparse.ArgumentParser:
     data_sub = data_parser.add_subparsers(dest="data_command")
     data_gen = data_sub.add_parser("gen", help="Run synthetic data generation")
     data_gen.add_argument("config_path", type=Path)
+    data_gen.add_argument(
+        "--skip-path-check",
+        action="store_true",
+        help="Skip local dataset path existence check",
+    )
     _add_common_flags(data_gen)
 
     eval_parser = subparsers.add_parser("eval", help="Run evaluation harness")
@@ -234,7 +246,10 @@ def _cmd_plan(args: argparse.Namespace) -> None:
 
 def _cmd_run(args: argparse.Namespace) -> None:
     logger = _logger(args.machine, args.verbose)
-    skip_path = args.skip_path_check or args.dry_run
+    # Real runs always require a resolvable dataset path; skip only for dry-run.
+    if args.skip_path_check and not args.dry_run:
+        logger.warn("Ignoring --skip-path-check for non-dry-run; dataset path is required")
+    skip_path = args.dry_run
     config = load_config(args.config_path, check_dataset_path=not skip_path)
     run_id = run_pipeline(
         config,
@@ -253,7 +268,7 @@ def _cmd_resume(args: argparse.Namespace) -> None:
     record = registry.get_run(args.run_id)
     if record is None:
         raise ValidationError(f"Run not found: {args.run_id}")
-    config = load_config_from_dict(record.config)
+    config = _config_from_record(record)
     checkpoint = registry.find_latest_checkpoint(args.run_id)
     run_pipeline(
         config,
@@ -267,7 +282,7 @@ def _cmd_resume(args: argparse.Namespace) -> None:
 
 def _cmd_data_gen(args: argparse.Namespace) -> None:
     logger = _logger(args.machine, args.verbose)
-    config = load_config(args.config_path)
+    config = load_config(args.config_path, check_dataset_path=not args.skip_path_check)
     dataset = generate_synthetic_data(config, logger)
     out = config.output_path() / "synthetic_data"
     out.mkdir(parents=True, exist_ok=True)
@@ -289,7 +304,7 @@ def _cmd_export(args: argparse.Namespace) -> None:
     record = registry.get_run(args.run_id)
     if record is None:
         raise ValidationError(f"Run not found: {args.run_id}")
-    config = load_config_from_dict(record.config)
+    config = _config_from_record(record)
     fmt = ExportFormat(args.format)
     checkpoint = registry.find_latest_checkpoint(args.run_id)
     artifacts = export_run(config, formats=[fmt], checkpoint_path=checkpoint, logger=logger)
