@@ -65,15 +65,30 @@ def resolve_dataset_path(path_str: str, *, config_dir: Path | None = None) -> Pa
     """Resolve a dataset path.
 
     - Absolute paths are returned as-is (resolved).
-    - When ``config_dir`` is set, relative paths resolve **only** against it.
-    - When ``config_dir`` is None, relative paths resolve against cwd.
+    - Relative paths require ``config_dir`` and resolve **only** against it.
+    - Relative paths without ``config_dir`` raise ``ValidationError`` (no cwd fallback).
     """
     path = Path(path_str)
     if path.is_absolute():
         return path.resolve()
-    if config_dir is not None:
-        return (config_dir / path).resolve()
-    return path.resolve()
+    if config_dir is None:
+        raise ValidationError(
+            f"Relative dataset path requires config_dir: {path_str}",
+            field_path="data.dataset.path",
+            details={
+                "errors": [
+                    {
+                        "field_path": "data.dataset.path",
+                        "message": (
+                            f"Relative dataset path requires config_dir: {path_str}. "
+                            "Load the config from a file, or pass an absolute path."
+                        ),
+                        "type": "value_error",
+                    }
+                ]
+            },
+        )
+    return (config_dir / path).resolve()
 
 
 def with_resolved_dataset_paths(config: PTKConfig) -> PTKConfig:

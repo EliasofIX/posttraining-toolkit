@@ -27,7 +27,7 @@ from ptk.exceptions import (
 from ptk.export.formats import export_run
 from ptk.logging import Logger
 from ptk.pipeline import plan_run, run_pipeline
-from ptk.registry.runs import RunRecord, RunRegistry
+from ptk.registry.runs import RunRegistry, config_from_record
 
 
 class CLIExit(SystemExit):
@@ -64,10 +64,6 @@ def load_config_from_dict(data: dict, *, config_dir: str | Path | None = None) -
     if config_dir is not None:
         config.set_config_dir(Path(config_dir))
     return config
-
-
-def _config_from_record(record: RunRecord) -> PTKConfig:
-    return load_config_from_dict(record.config, config_dir=record.config_dir)
 
 
 def _add_common_flags(parser: argparse.ArgumentParser) -> None:
@@ -268,7 +264,7 @@ def _cmd_resume(args: argparse.Namespace) -> None:
     record = registry.get_run(args.run_id)
     if record is None:
         raise ValidationError(f"Run not found: {args.run_id}")
-    config = _config_from_record(record)
+    config = config_from_record(record)
     checkpoint = registry.find_latest_checkpoint(args.run_id)
     run_pipeline(
         config,
@@ -304,7 +300,7 @@ def _cmd_export(args: argparse.Namespace) -> None:
     record = registry.get_run(args.run_id)
     if record is None:
         raise ValidationError(f"Run not found: {args.run_id}")
-    config = _config_from_record(record)
+    config = config_from_record(record)
     fmt = ExportFormat(args.format)
     checkpoint = registry.find_latest_checkpoint(args.run_id)
     artifacts = export_run(config, formats=[fmt], checkpoint_path=checkpoint, logger=logger)

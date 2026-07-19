@@ -60,6 +60,14 @@ class RunRecord:
         return cls(**data)
 
 
+def config_from_record(record: RunRecord) -> PTKConfig:
+    """Rebuild a PTKConfig from a registry record, restoring config_dir for path resolution."""
+    config = PTKConfig.model_validate(record.config)
+    if record.config_dir is not None:
+        config.set_config_dir(Path(record.config_dir))
+    return config
+
+
 class RunRegistry:
     """Manage training runs with idempotent resume support."""
 
@@ -115,7 +123,7 @@ class RunRegistry:
         if record is None:
             return None
 
-        config = PTKConfig.model_validate(record.config)
+        config = config_from_record(record)
         checkpoint_root = config.output_path() / "checkpoints"
         if checkpoint_root.exists():
             numbered = sorted(

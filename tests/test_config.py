@@ -223,6 +223,64 @@ data:
         load_config(cfg)
 
 
+def test_relative_path_without_config_dir_fails_closed():
+    from ptk.config.loader import resolve_dataset_path
+    from ptk.config.schema import DatasetConfig, DatasetFormat
+    from ptk.data.loaders import count_dataset_samples
+
+    with pytest.raises(ValidationError, match="requires config_dir"):
+        resolve_dataset_path("data/train.jsonl", config_dir=None)
+
+    with pytest.raises(ValidationError, match="requires config_dir"):
+        count_dataset_samples(
+            DatasetConfig(path="data/train.jsonl", format=DatasetFormat.JSONL),
+            base_dir=None,
+        )
+
+
+def test_resume_config_dir_resolves_after_cwd_change(tmp_path, monkeypatch):
+    """Registry config_dir must keep relative dataset paths working after chdir."""
+    from ptk.config.loader import resolve_dataset_path
+    from ptk.data.loaders import load_raw_dataset
+    from ptk.registry.runs import RunRegistry, config_from_record
+    from ptk.registry.store import LocalStore
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "data").mkdir()
+    (project / "data" / "train.jsonl").write_text('{"text": "from-project"}\n', encoding="utf-8")
+    cfg = project / "run.yaml"
+    cfg.write_text(
+        """
+run_name: resume-cwd
+base_model: distilgpt2
+method: sft
+data:
+  source: dataset
+  dataset:
+    path: data/train.jsonl
+    format: jsonl
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(cfg)
+    store = LocalStore(tmp_path / "registry")
+    registry = RunRegistry(store=store)
+    record = registry.create_run(config)
+
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.chdir(other)
+
+    restored = config_from_record(record)
+    assert restored.config_dir == project.resolve()
+    resolved = resolve_dataset_path(restored.data.dataset.path, config_dir=restored.config_dir)
+    assert resolved.exists()
+    table = load_raw_dataset(restored.data.dataset, base_dir=restored.config_dir)
+    assert table[0]["text"] == "from-project"
+
+
 def test_load_config_rejects_directory_dataset_path(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()

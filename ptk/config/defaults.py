@@ -105,7 +105,11 @@ def scaffold_config(
     run_name: str = "my-run",
     base_model: str = "distilgpt2",
 ) -> PTKConfig:
-    """Build a commented-ready starter config for a given method."""
+    """Build a commented-ready starter config for a given method.
+
+    Dataset paths are relative to the config file directory once written
+    (``./data/...`` means alongside the YAML, not the process cwd).
+    """
     overrides = defaults_for_method(method)
     data = DataConfig(
         source=DataSource.DATASET,
