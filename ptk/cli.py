@@ -91,6 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
     validate_parser = subparsers.add_parser("validate", help="Validate a config file")
     validate_parser.add_argument("config_path", type=Path)
     validate_parser.add_argument("--json", action="store_true", help="Structured JSON output")
+    validate_parser.add_argument(
+        "--skip-path-check",
+        action="store_true",
+        help="Skip local dataset path existence check (for scaffolding before data exists)",
+    )
     _add_common_flags(validate_parser)
 
     plan_parser = subparsers.add_parser("plan", help="Dry-run resource estimates")
@@ -198,7 +203,7 @@ def _cmd_init(args: argparse.Namespace) -> None:
 
 def _cmd_validate(args: argparse.Namespace) -> None:
     logger = _logger(args.machine, args.verbose)
-    config = load_config(args.config_path)
+    config = load_config(args.config_path, check_dataset_path=not args.skip_path_check)
     if args.json or args.machine:
         sys.stdout.write(
             json.dumps({"valid": True, "run_name": config.run_name, "method": config.method.value}) + "\n"

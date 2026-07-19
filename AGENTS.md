@@ -61,10 +61,13 @@ Every config MUST include:
 
 ```bash
 ptk init --method lora --output /tmp/lora.yaml --base-model distilgpt2
-ptk validate /tmp/lora.yaml --json
+# Path check is on by default; skip until data exists, or use repo sample data/
+ptk validate /tmp/lora.yaml --json --skip-path-check
+# From repo root with sample data present:
+ptk validate configs/examples/lora.yaml --json
 ```
 
-Prefer `ptk init` + surgical edits over writing YAML from memory.
+Prefer `ptk init` + surgical edits over writing YAML from memory. Sample datasets live in `data/`.
 
 ### 2.4 Safe Defaults for CI / Smoke Tests
 
@@ -74,11 +77,13 @@ When testing pipeline health, use tiny models and limits:
 base_model: distilgpt2
 training:
   max_iters: 2
-  batch_size: 1
+  batch_size: 1   # GRPO: see §5.6 — must be compatible with num_generations
   max_seq_length: 64
 compute:
   device: cpu
 ```
+
+For GRPO smoke tests use `batch_size: 2` with `num_generations: 2` (not `batch_size: 1`).
 
 ---
 
@@ -194,21 +199,26 @@ DeepSpeed is CUDA-only. Set `compute.deepspeed_config` to override auto-generati
 ### 5.4 Missing Dataset
 
 ```
-VALIDATION_ERROR: data.dataset.path not found
+VALIDATION_ERROR: Dataset path not found: ...
 ```
 
-Generate fixture data or switch to `data.source: synthetic`.
+- **When:** `ptk validate` / `ptk plan` / `ptk run` (path check is on by default in `load_config`)
+- **Not when:** `ptk init` (scaffolds without checking), or `ptk validate --skip-path-check`
+- **Fix:** Point at existing data (`data/train.jsonl`, `data/preferences.jsonl`, or `tests/fixtures/data/`), generate fixture data, or switch to `data.source: synthetic`.
 
 ### 5.5 PPO Failures
 
-- `reward_model` must share the policy tokenizer vocabulary (same tokenizer IDs). If you configure a different `reward_model`, the toolkit falls back to the `base_model` backbone with a warning.
-- Keep `max_iters` low for smoke tests (PPO is slow).
+- PPO always tokenizes the train set to `input_ids` before TRL `PPOTrainer` (required; do not pass raw `text` columns).
+- Policy, reward, and value models load as **separate** backbones (not a shared module graph).
+- `reward_model` must share the policy tokenizer vocabulary. If you configure a different `reward_model`, the toolkit falls back to `base_model` for reward scoring with a warning.
+- Keep `max_iters` low for smoke tests (PPO is slow; three model loads).
 - TRL 1.x uses `trl.experimental.ppo`; ensure `TRL_EXPERIMENTAL_SILENCE=1` is set (handled automatically by `ptk`).
 
 ### 5.6 GRPO batch sizing
 
-- `training.batch_size` × `training.rl.num_generations` must satisfy TRL constraints: `generation_batch_size` divisible by `num_generations`, and `num_generations >= 2`.
+- Schema-validated: `training.batch_size * training.gradient_accumulation_steps` must be divisible by `training.rl.num_generations`, and `num_generations >= 2`.
 - Example smoke config: `batch_size: 2`, `num_generations: 2`.
+- Invalid configs fail at `ptk validate`, not only inside TRL.
 
 ### 5.7 Hub Push Failures
 
@@ -290,7 +300,7 @@ Update AGENTS.md when you:
 - Session-specific paths (`/tmp/my-run-47`)
 - Secrets or API keys
 - Prose duplicates of `ptk schema --json`
-- Milestone/staging plans (this project ships complete)
+- Milestone/staging plans (prefer concrete CI/runtime facts over roadmap prose)
 
 ### 8.4 Validation After Update
 
@@ -308,6 +318,7 @@ ptk validate tests/fixtures/sft.yaml --json
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-07-19 | CI/training hardening: PPO always-tokenize + separate backbones, DPO use_cpu, GRPO schema batch rules, validate path check, sample data/, method e2e fixtures, dep floors | agent |
 | 2026-07-05 | Efficiency overhaul: Parquet cache, rank-0 gating, hardware defaults, DPO fp16, lazy PPO tokenization, DeepSpeed wiring, batched eval | agent |
 | 2026-07-03 | Pipeline optimizations: eval skip fix, data cache, DPO memory, distributed launch, dataloader knobs | agent |
 | 2026-07-01 | GGUF native GPT-2 converter, PPO/GRPO e2e tests, GitHub Actions CI | bootstrap |

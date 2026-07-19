@@ -23,11 +23,13 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
+    "accelerate>=1.4.0",
+    "datasets>=4.7.0",
     "peft>=0.10.0",
     "pydantic>=2.6.0",
     "torch>=2.1.0",
-    "transformers>=4.40.0",
-    "trl>=0.8.0",
+    "transformers>=4.56.2",
+    "trl>=1.7.0,<2",
 ]
 
 [project.optional-dependencies]

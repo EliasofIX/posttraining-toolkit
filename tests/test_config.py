@@ -58,3 +58,86 @@ def test_ppo_requires_reward_model():
             ),
             training=TrainingConfig(rl=RLConfig(reward_model=None)),
         )
+
+
+def test_grpo_rejects_incompatible_batch_size():
+    from ptk.config.schema import (
+        DataConfig,
+        DatasetConfig,
+        DatasetFormat,
+        PTKConfig,
+        RLConfig,
+        TrainingConfig,
+    )
+
+    with pytest.raises(Exception):
+        PTKConfig(
+            run_name="test-grpo-bad",
+            base_model="distilgpt2",
+            method=TrainingMethod.GRPO,
+            data=DataConfig(
+                dataset=DatasetConfig(path="x", format=DatasetFormat.JSONL),
+            ),
+            training=TrainingConfig(
+                batch_size=1,
+                gradient_accumulation_steps=1,
+                rl=RLConfig(num_generations=2),
+            ),
+        )
+
+
+def test_grpo_accepts_compatible_batch_size():
+    from ptk.config.schema import (
+        DataConfig,
+        DatasetConfig,
+        DatasetFormat,
+        PTKConfig,
+        RLConfig,
+        TrainingConfig,
+    )
+
+    config = PTKConfig(
+        run_name="test-grpo-ok",
+        base_model="distilgpt2",
+        method=TrainingMethod.GRPO,
+        data=DataConfig(
+            dataset=DatasetConfig(path="x", format=DatasetFormat.JSONL),
+        ),
+        training=TrainingConfig(
+            batch_size=2,
+            gradient_accumulation_steps=1,
+            rl=RLConfig(num_generations=2),
+        ),
+    )
+    assert config.training.rl is not None
+    assert config.training.rl.num_generations == 2
+
+
+def test_load_config_checks_dataset_path(tmp_path):
+    from ptk.config.loader import load_config
+
+    cfg = tmp_path / "missing-data.yaml"
+    cfg.write_text(
+        """
+run_name: missing-data
+base_model: distilgpt2
+method: sft
+data:
+  source: dataset
+  dataset:
+    path: /nonexistent/train.jsonl
+    format: jsonl
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError, match="Dataset path not found"):
+        load_config(cfg)
+
+    config = load_config(cfg, check_dataset_path=False)
+    assert config.run_name == "missing-data"
+
+
+def test_load_all_method_fixtures():
+    for name in ("sft.yaml", "lora.yaml", "qlora.yaml", "dpo.yaml", "ppo.yaml", "grpo.yaml"):
+        config = load_config(FIXTURES / name)
+        assert config.method.value in name

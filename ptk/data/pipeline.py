@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ptk.config.schema import DataConfig, DatasetConfig, SyntheticFilters, TrainingMethod
+from ptk.config.schema import DataConfig, SyntheticFilters, TrainingMethod
 from ptk.data.loaders import load_raw_dataset, normalize_dpo_columns, normalize_sft_columns
 from ptk.data.table import Table, TableDict
 

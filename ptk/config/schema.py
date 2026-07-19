@@ -157,7 +157,6 @@ class TrainingConfig(BaseModel):
     dataloader_prefetch_factor: int | None = Field(default=None, ge=1)
     dataloader_persistent_workers: bool | None = None
     dataset_num_proc: int | None = Field(default=None, ge=1)
-    pretokenize_dataset: bool = False
     gradient_checkpointing: bool = False
     lora: LoRAConfig | None = None
     quantization: QuantizationConfig | None = None
@@ -221,6 +220,20 @@ class PTKConfig(BaseModel):
                 self.training.rl = RLConfig()
         if method == TrainingMethod.PPO and not self.training.rl.reward_model:
             raise ValueError("training.rl.reward_model is required for PPO")
+        if method == TrainingMethod.GRPO:
+            assert self.training.rl is not None
+            num_generations = self.training.rl.num_generations
+            if num_generations < 2:
+                raise ValueError("training.rl.num_generations must be >= 2 for GRPO")
+            generation_batch_size = (
+                self.training.batch_size * self.training.gradient_accumulation_steps
+            )
+            if generation_batch_size % num_generations != 0:
+                raise ValueError(
+                    "For GRPO, training.batch_size * training.gradient_accumulation_steps "
+                    f"({generation_batch_size}) must be divisible by training.rl.num_generations "
+                    f"({num_generations})"
+                )
         return self
 
     def output_path(self) -> Path:

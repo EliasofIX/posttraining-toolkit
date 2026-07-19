@@ -18,7 +18,7 @@ training:
   save_steps: 3
   rl:
     beta: 0.1
-    reward_model: distilbert-base-uncased
+    reward_model: distilgpt2
     kl_coef: 0.05
     max_completion_length: 32
 

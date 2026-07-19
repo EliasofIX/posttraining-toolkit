@@ -9,11 +9,11 @@ A single declarative YAML/JSON config drives the entire pipeline: from synthetic
 ```bash
 pip install -e ".[dev]"
 
-# Scaffold a config
+# Scaffold a config (sample datasets live in data/)
 ptk init --method sft --output my-config.yaml
 
 # Validate and plan
-ptk validate my-config.yaml
+ptk validate my-config.yaml --json
 ptk plan my-config.yaml --json
 
 # Run full pipeline
@@ -22,6 +22,8 @@ ptk run my-config.yaml
 # Agent mode (JSONL logs, stable exit codes)
 ptk run my-config.yaml --machine
 ```
+
+Example configs in `configs/examples/` use `./data/train.jsonl` and `./data/preferences.jsonl`.
 
 ## Supported Methods
 

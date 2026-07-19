@@ -9,6 +9,7 @@ from trl import GRPOConfig, GRPOTrainer
 
 from ptk.data.hf_adapter import to_hf_dataset_dict
 from ptk.data.table import TableDict
+from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
 from ptk.training.base_trainer import (
     BaseTrainer,
     TrainerResult,
@@ -19,7 +20,6 @@ from ptk.training.base_trainer import (
     prepare_tokenizer,
     resolve_resume_checkpoint,
 )
-from ptk.distributed.detect import resolve_mixed_precision, torch_device_string
 
 
 def _reward_length(completions: list, **kwargs) -> list[float]:

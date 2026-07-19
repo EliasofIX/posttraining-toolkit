@@ -2,11 +2,12 @@
 
 import json
 import time
-from pathlib import Path
 
-from ptk.config.schema import DataConfig, DatasetConfig, DatasetFormat, PTKConfig, TrainingMethod
-from ptk.data.pipeline import compute_data_cache_key, preprocess_dataset, save_processed_cache, load_processed_cache
-from ptk.data.table import Table, TableDict
+from ptk.config.schema import DataConfig, DatasetConfig, DatasetFormat, TrainingMethod
+from ptk.data.pipeline import (
+    compute_data_cache_key,
+    preprocess_dataset,
+)
 
 
 def test_preprocess_10k_rows_under_threshold(tmp_path):

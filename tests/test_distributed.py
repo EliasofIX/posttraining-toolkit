@@ -7,7 +7,12 @@ from unittest.mock import patch
 import pytest
 
 from ptk.config.schema import ComputeStrategy, DeviceType
-from ptk.distributed.detect import detect_device, detect_environment, is_main_process, resolve_mixed_precision
+from ptk.distributed.detect import (
+    detect_device,
+    detect_environment,
+    is_main_process,
+    resolve_mixed_precision,
+)
 
 
 def test_detect_device_auto():

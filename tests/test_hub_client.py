@@ -8,7 +8,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ptk.hub.client import HubClient, _build_ndjson_commit, _is_repo_already_exists_error, _parse_repo_id
+from ptk.hub.client import (
+    HubClient,
+    _build_ndjson_commit,
+    _is_repo_already_exists_error,
+    _parse_repo_id,
+)
 
 
 def test_parse_repo_id_with_namespace():

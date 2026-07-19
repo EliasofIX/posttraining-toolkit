@@ -27,7 +27,7 @@ def test_dpo_config_receives_fp16_on_cuda():
     env = ComputeEnvironment(device=DeviceType.CUDA, strategy=__import__("ptk.config.schema", fromlist=["ComputeStrategy"]).ComputeStrategy.SINGLE_GPU)
     logger = Logger(machine=False, verbose=False)
 
-    from ptk.data.table import TableDict, Table
+    from ptk.data.table import Table, TableDict
     from ptk.training.rl.dpo import DPOTrainerWrapper
 
     dataset = TableDict({"train": Table.from_dict({"prompt": ["p"], "chosen": ["c"], "rejected": ["r"]})})
@@ -53,3 +53,4 @@ def test_dpo_config_receives_fp16_on_cuda():
         wrapper.train(dataset)
 
     assert captured.get("fp16") is True
+    assert captured.get("use_cpu") is False

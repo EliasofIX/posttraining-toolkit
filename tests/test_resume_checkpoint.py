@@ -1,6 +1,5 @@
 """Resume checkpoint resolution tests."""
 
-from pathlib import Path
 
 from ptk.training.base_trainer import resolve_resume_checkpoint
 

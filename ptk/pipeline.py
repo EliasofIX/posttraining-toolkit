@@ -34,7 +34,7 @@ from ptk.eval.harness import EvalHarness
 from ptk.export.formats import export_run
 from ptk.logging import Logger
 from ptk.registry.runs import RunRegistry, RunStatus
-from ptk.training.base_trainer import get_trainer, resolve_resume_checkpoint
+from ptk.training.base_trainer import get_trainer
 
 
 def plan_run(config: PTKConfig) -> dict[str, Any]:

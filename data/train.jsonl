@@ -1,0 +1,5 @@
+{"text": "Instruction: What is machine learning?\nResponse: Machine learning is a subset of AI where systems learn from data."}
+{"text": "Instruction: Explain Python.\nResponse: Python is a high-level programming language known for readability."}
+{"text": "Instruction: What is fine-tuning?\nResponse: Fine-tuning adapts a pretrained model to a specific downstream task."}
+{"text": "Instruction: Define LoRA.\nResponse: LoRA adds low-rank adapters to freeze most weights during fine-tuning."}
+{"text": "Instruction: What is DPO?\nResponse: DPO aligns models using preference pairs without an explicit reward model."}
