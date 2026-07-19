@@ -113,6 +113,36 @@ def test_grpo_accepts_compatible_batch_size():
     assert config.training.rl.num_generations == 2
 
 
+def test_grpo_allows_single_batch_on_multi_gpu_strategy():
+    """TRL multiplies by world_size; schema must not reject multi_gpu 1×2 configs."""
+    from ptk.config.schema import (
+        ComputeConfig,
+        ComputeStrategy,
+        DataConfig,
+        DatasetConfig,
+        DatasetFormat,
+        PTKConfig,
+        RLConfig,
+        TrainingConfig,
+    )
+
+    config = PTKConfig(
+        run_name="test-grpo-multi",
+        base_model="distilgpt2",
+        method=TrainingMethod.GRPO,
+        data=DataConfig(
+            dataset=DatasetConfig(path="x", format=DatasetFormat.JSONL),
+        ),
+        training=TrainingConfig(
+            batch_size=1,
+            gradient_accumulation_steps=1,
+            rl=RLConfig(num_generations=2),
+        ),
+        compute=ComputeConfig(strategy=ComputeStrategy.MULTI_GPU),
+    )
+    assert config.compute.strategy == ComputeStrategy.MULTI_GPU
+
+
 def test_load_config_checks_dataset_path(tmp_path):
     from ptk.config.loader import load_config
 
@@ -137,7 +167,32 @@ data:
     assert config.run_name == "missing-data"
 
 
+def test_load_config_resolves_path_relative_to_config_dir(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    data_file = data_dir / "train.jsonl"
+    data_file.write_text('{"text": "hello"}\n', encoding="utf-8")
+    cfg = tmp_path / "run.yaml"
+    cfg.write_text(
+        """
+run_name: rel-path
+base_model: distilgpt2
+method: sft
+data:
+  source: dataset
+  dataset:
+    path: data/train.jsonl
+    format: jsonl
+""",
+        encoding="utf-8",
+    )
+    config = load_config(cfg)
+    assert Path(config.data.dataset.path).is_absolute()
+    assert Path(config.data.dataset.path).exists()
+
+
 def test_load_all_method_fixtures():
     for name in ("sft.yaml", "lora.yaml", "qlora.yaml", "dpo.yaml", "ppo.yaml", "grpo.yaml"):
         config = load_config(FIXTURES / name)
         assert config.method.value in name
+        assert Path(config.data.dataset.path).exists()

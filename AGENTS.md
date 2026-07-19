@@ -61,13 +61,14 @@ Every config MUST include:
 
 ```bash
 ptk init --method lora --output /tmp/lora.yaml --base-model distilgpt2
-# Path check is on by default; skip until data exists, or use repo sample data/
+# Path check is on by default; skip until data exists
 ptk validate /tmp/lora.yaml --json --skip-path-check
-# From repo root with sample data present:
+ptk plan /tmp/lora.yaml --json --skip-path-check
+# Example configs resolve data paths relative to the config file:
 ptk validate configs/examples/lora.yaml --json
 ```
 
-Prefer `ptk init` + surgical edits over writing YAML from memory. Sample datasets live in `data/`.
+Prefer `ptk init` + surgical edits over writing YAML from memory. Sample datasets live in `data/` (examples use `../../data/...`).
 
 ### 2.4 Safe Defaults for CI / Smoke Tests
 
@@ -202,23 +203,26 @@ DeepSpeed is CUDA-only. Set `compute.deepspeed_config` to override auto-generati
 VALIDATION_ERROR: Dataset path not found: ...
 ```
 
-- **When:** `ptk validate` / `ptk plan` / `ptk run` (path check is on by default in `load_config`)
-- **Not when:** `ptk init` (scaffolds without checking), or `ptk validate --skip-path-check`
-- **Fix:** Point at existing data (`data/train.jsonl`, `data/preferences.jsonl`, or `tests/fixtures/data/`), generate fixture data, or switch to `data.source: synthetic`.
+- **When:** `ptk validate` / `ptk plan` / `ptk run` (path check on by default)
+- **Skip:** `--skip-path-check` on validate/plan/run; `--dry-run` implies skip for run
+- **Resolution:** relative paths try config-file directory first, then cwd
+- **Fix:** Place data next to the config (or use `data/` / `tests/fixtures/data/`), generate fixtures, or set `data.source: synthetic`
 
 ### 5.5 PPO Failures
 
-- PPO always tokenizes the train set to `input_ids` before TRL `PPOTrainer` (required; do not pass raw `text` columns).
-- Policy, reward, and value models load as **separate** backbones (not a shared module graph).
-- `reward_model` must share the policy tokenizer vocabulary. If you configure a different `reward_model`, the toolkit falls back to `base_model` for reward scoring with a warning.
-- Keep `max_iters` low for smoke tests (PPO is slow; three model loads).
-- TRL 1.x uses `trl.experimental.ppo`; ensure `TRL_EXPERIMENTAL_SILENCE=1` is set (handled automatically by `ptk`).
+- PPO always tokenizes the train set to `input_ids` before TRL `PPOTrainer`.
+- Policy / reward / value load as **separate** backbones (3× memory vs SFT).
+- Reward **score head is randomly initialized** — fine for smoke tests, not a trained RM. Use a real reward model for meaningful RL.
+- `reward_model` must share the policy tokenizer; otherwise toolkit falls back to `base_model` with a warning.
+- Keep `max_iters` low for smoke tests.
+- TRL 1.x uses `trl.experimental.ppo`; `TRL_EXPERIMENTAL_SILENCE=1` is set automatically.
 
 ### 5.6 GRPO batch sizing
 
-- Schema-validated: `training.batch_size * training.gradient_accumulation_steps` must be divisible by `training.rl.num_generations`, and `num_generations >= 2`.
+- `num_generations >= 2` always.
+- Single-process (`auto` / `single_gpu`): `batch_size * gradient_accumulation_steps` must be divisible by `num_generations` (schema-enforced).
+- `multi_gpu` / `multi_node`: schema skips the batch check; TRL validates `batch * world_size * steps_per_generation` at runtime.
 - Example smoke config: `batch_size: 2`, `num_generations: 2`.
-- Invalid configs fail at `ptk validate`, not only inside TRL.
 
 ### 5.7 Hub Push Failures
 
@@ -318,6 +322,7 @@ ptk validate tests/fixtures/sft.yaml --json
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-07-19 | Review follow-ups: YAML empty-list dump, config-relative dataset paths, GRPO multi-GPU schema exemption, PPO reward-head warning, plan/run --skip-path-check | agent |
 | 2026-07-19 | CI/training hardening: PPO always-tokenize + separate backbones, DPO use_cpu, GRPO schema batch rules, validate path check, sample data/, method e2e fixtures, dep floors | agent |
 | 2026-07-05 | Efficiency overhaul: Parquet cache, rank-0 gating, hardware defaults, DPO fp16, lazy PPO tokenization, DeepSpeed wiring, batched eval | agent |
 | 2026-07-03 | Pipeline optimizations: eval skip fix, data cache, DPO memory, distributed launch, dataloader knobs | agent |

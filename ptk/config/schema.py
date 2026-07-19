@@ -225,15 +225,25 @@ class PTKConfig(BaseModel):
             num_generations = self.training.rl.num_generations
             if num_generations < 2:
                 raise ValueError("training.rl.num_generations must be >= 2 for GRPO")
-            generation_batch_size = (
-                self.training.batch_size * self.training.gradient_accumulation_steps
-            )
-            if generation_batch_size % num_generations != 0:
-                raise ValueError(
-                    "For GRPO, training.batch_size * training.gradient_accumulation_steps "
-                    f"({generation_batch_size}) must be divisible by training.rl.num_generations "
-                    f"({num_generations})"
+            # TRL uses per_device_batch * world_size * steps_per_generation.
+            # Without a known world_size, enforce the single-process case only.
+            # Multi-GPU / multi-node configs are checked at runtime by TRL.
+            if self.compute.strategy not in (
+                ComputeStrategy.MULTI_GPU,
+                ComputeStrategy.MULTI_NODE,
+            ):
+                generation_batch_size = (
+                    self.training.batch_size * self.training.gradient_accumulation_steps
                 )
+                if generation_batch_size % num_generations != 0:
+                    raise ValueError(
+                        "For GRPO on a single process, training.batch_size * "
+                        "training.gradient_accumulation_steps "
+                        f"({generation_batch_size}) must be divisible by "
+                        f"training.rl.num_generations ({num_generations}). "
+                        "For multi-GPU, set compute.strategy to multi_gpu "
+                        "(TRL validates world_size * batch at runtime)."
+                    )
         return self
 
     def output_path(self) -> Path:

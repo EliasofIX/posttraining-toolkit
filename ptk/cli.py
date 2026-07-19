@@ -101,6 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
     plan_parser = subparsers.add_parser("plan", help="Dry-run resource estimates")
     plan_parser.add_argument("config_path", type=Path)
     plan_parser.add_argument("--json", action="store_true")
+    plan_parser.add_argument(
+        "--skip-path-check",
+        action="store_true",
+        help="Skip local dataset path existence check",
+    )
     _add_common_flags(plan_parser)
 
     run_parser = subparsers.add_parser("run", help="Execute the full pipeline")
@@ -108,6 +113,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--dry-run", action="store_true")
     run_parser.add_argument("--skip-eval", action="store_true")
     run_parser.add_argument("--skip-export", action="store_true")
+    run_parser.add_argument(
+        "--skip-path-check",
+        action="store_true",
+        help="Skip local dataset path existence check (implied by --dry-run)",
+    )
     _add_common_flags(run_parser)
 
     resume_parser = subparsers.add_parser("resume", help="Resume from last checkpoint")
@@ -213,7 +223,7 @@ def _cmd_validate(args: argparse.Namespace) -> None:
 
 
 def _cmd_plan(args: argparse.Namespace) -> None:
-    config = load_config(args.config_path)
+    config = load_config(args.config_path, check_dataset_path=not args.skip_path_check)
     plan = plan_run(config)
     if args.json or args.machine:
         sys.stdout.write(json.dumps(plan) + "\n")
@@ -224,7 +234,8 @@ def _cmd_plan(args: argparse.Namespace) -> None:
 
 def _cmd_run(args: argparse.Namespace) -> None:
     logger = _logger(args.machine, args.verbose)
-    config = load_config(args.config_path)
+    skip_path = args.skip_path_check or args.dry_run
+    config = load_config(args.config_path, check_dataset_path=not skip_path)
     run_id = run_pipeline(
         config,
         logger,

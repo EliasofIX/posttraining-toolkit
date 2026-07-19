@@ -23,7 +23,7 @@ ptk run my-config.yaml
 ptk run my-config.yaml --machine
 ```
 
-Example configs in `configs/examples/` use `./data/train.jsonl` and `./data/preferences.jsonl`.
+Example configs in `configs/examples/` point at `../../data/train.jsonl` and `../../data/preferences.jsonl` (resolved relative to the config file).
 
 ## Supported Methods
 

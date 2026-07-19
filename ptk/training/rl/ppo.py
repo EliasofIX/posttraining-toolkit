@@ -93,10 +93,19 @@ class PPOTrainerWrapper(BaseTrainer):
             reward_source = self.config.base_model
 
         # Separate backbones so policy / reward / value do not share parameters.
+        # Note: three full model loads — expect higher RAM than SFT/LoRA smoke runs.
+        self.logger.warn(
+            "PPO loads three model copies (policy, reward, value); watch memory on small hosts",
+            base_model=self.config.base_model,
+        )
         policy = AutoModelForCausalLM.from_pretrained(self.config.base_model, trust_remote_code=True)
         reward_backbone = AutoModelForCausalLM.from_pretrained(reward_source, trust_remote_code=True)
         value_backbone = AutoModelForCausalLM.from_pretrained(self.config.base_model, trust_remote_code=True)
         reward_model = _PPORewardModel(reward_backbone)
+        self.logger.warn(
+            "PPO reward score head is randomly initialized; use a trained reward model for real RL",
+            reward_source=reward_source,
+        )
         value_wrapped = AutoModelForCausalLMWithValueHead(value_backbone)
         value_model = _PPOValueModel(value_wrapped)
 

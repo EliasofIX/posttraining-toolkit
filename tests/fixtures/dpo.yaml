@@ -5,7 +5,7 @@ method: dpo
 data:
   source: dataset
   dataset:
-    path: tests/fixtures/data/preferences.jsonl
+    path: data/preferences.jsonl
     format: jsonl
     prompt_column: prompt
     chosen_column: chosen

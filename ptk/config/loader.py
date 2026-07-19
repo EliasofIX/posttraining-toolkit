@@ -16,6 +16,10 @@ from ptk.exceptions import ValidationError
 def load_config(path: str | Path, *, check_dataset_path: bool = True) -> PTKConfig:
     """Load and validate a config from YAML or JSON.
 
+    Relative ``data.dataset.path`` values are resolved against the config file's
+    directory first, then the process cwd (whichever exists). When neither exists,
+    the config-relative path is kept for the error message.
+
     When ``check_dataset_path`` is True (default), local dataset paths must exist.
     Use ``check_dataset_path=False`` for scaffolding or offline schema checks.
     """
@@ -44,7 +48,58 @@ def load_config(path: str | Path, *, check_dataset_path: bool = True) -> PTKConf
     if not isinstance(data, dict):
         raise ValidationError("Config root must be a mapping/object", field_path="$")
 
-    return validate_config_dict(data, check_dataset_path=check_dataset_path)
+    return validate_config_dict(
+        data,
+        check_dataset_path=check_dataset_path,
+        config_dir=path.parent.resolve(),
+    )
+
+
+def resolve_dataset_path(path_str: str, *, config_dir: Path | None = None) -> Path:
+    """Resolve a dataset path against config dir and/or cwd.
+
+    Preference order for relative paths:
+    1. Absolute path as given
+    2. Path relative to ``config_dir`` if it exists
+    3. Path relative to cwd if it exists
+    4. Config-dir join (for stable error messages when loading from a file)
+    5. Cwd join
+    """
+    path = Path(path_str)
+    if path.is_absolute():
+        return path
+
+    candidates: list[Path] = []
+    if config_dir is not None:
+        candidates.append((config_dir / path).resolve())
+    candidates.append(path.resolve())
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    if config_dir is not None:
+        return (config_dir / path).resolve()
+    return path.resolve()
+
+
+def apply_dataset_path_resolution(config: PTKConfig, *, config_dir: Path | None) -> PTKConfig:
+    """Return config with local dataset path resolved when possible."""
+    if config.data.source != DataSource.DATASET or config.data.dataset is None:
+        return config
+    dataset = config.data.dataset
+    if dataset.format == DatasetFormat.HF_HUB:
+        return config
+    resolved = resolve_dataset_path(dataset.path, config_dir=config_dir)
+    if str(resolved) == dataset.path:
+        return config
+    return config.model_copy(
+        update={
+            "data": config.data.model_copy(
+                update={"dataset": dataset.model_copy(update={"path": str(resolved)})}
+            )
+        }
+    )
 
 
 def check_dataset_path_exists(config: PTKConfig) -> None:
@@ -71,7 +126,12 @@ def check_dataset_path_exists(config: PTKConfig) -> None:
         )
 
 
-def validate_config_dict(data: dict[str, Any], *, check_dataset_path: bool = True) -> PTKConfig:
+def validate_config_dict(
+    data: dict[str, Any],
+    *,
+    check_dataset_path: bool = True,
+    config_dir: Path | None = None,
+) -> PTKConfig:
     """Validate a config dict and return structured errors on failure."""
     try:
         config = PTKConfig.model_validate(data)
@@ -91,6 +151,7 @@ def validate_config_dict(data: dict[str, Any], *, check_dataset_path: bool = Tru
             details={"errors": errors},
         ) from exc
 
+    config = apply_dataset_path_resolution(config, config_dir=config_dir)
     if check_dataset_path:
         check_dataset_path_exists(config)
     return config

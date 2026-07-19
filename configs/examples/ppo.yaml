@@ -5,7 +5,7 @@ method: ppo
 data:
   source: dataset
   dataset:
-    path: ./data/train.jsonl
+    path: ../../data/train.jsonl
     format: jsonl
     text_column: text
 
